@@ -2,11 +2,11 @@
 Internet radio based on Esp8266 and VS1053.
 This fork is optimised for Platformio and replaced ILI9163C display with LCD 2004
 
-NOTES:
+### NOTES:
 - LCD 2004 is not yet implemented, any contribution welcome.
 - The radio will NOT play AACP streams.
 
-Features:
+### Features:
 - Can connect to thousands of Internet radio stations that broadcast MP3 or Ogg audio streams.
 - Can connect to a standalone mp3 file on a server.
 - Can connect to a local mp3 file on SPIFFS.
