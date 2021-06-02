@@ -2535,7 +2535,7 @@ char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "rate" )                      // Rate command?
   {
-    vs1053player.AdjustRate ( ivalue ) ;              // Yes, adjust
+    vs1053player.adjustRate ( ivalue ) ;              // Yes, adjust
   }
   else if ( argument.startsWith ( "mqtt" ) )          // Parameter fo MQTT?
   {

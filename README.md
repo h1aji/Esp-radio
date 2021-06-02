@@ -3,7 +3,7 @@ Internet radio based on Esp8266 and VS1053.
 This fork is optimised for Platformio and replaced ILI9163C display with LCD 2004
 
 ### NOTES:
-- LCD 2004 is not yet implemented, any contribution welcome.
+- SRAM support is not yet implemented, any contribution welcome.
 - The radio will NOT play AACP streams.
 
 ### Features:
@@ -44,7 +44,7 @@ GPIO02    - DREQ
 GPIO15    - CS
 ```
 
-Infra-red sensor
+Infra-red receiver
 
 ```
 GPIO00 - IR
