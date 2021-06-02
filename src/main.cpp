@@ -41,24 +41,24 @@
 // The SPI interface for VS1053 and LCD uses hardware SPI.
 //
 // Wiring:
-// NodeMCU  GPIO    Pin to program  Wired to LCD        Wired to VS1053      Wired to rest
+// ESP-12F  GPIO    Pin to program  Wired to LCD        Wired to VS1053      Wired to rest
 // -------  ------  --------------  ---------------     -------------------  ---------------------
-// D0       GPIO16  16              -                   pin 1 DCS            -
+// D0       GPIO16  16              -                   DCS                  -
 // D1       GPIO5    5              SCL                 -                    LED on nodeMCU
 // D2       GPIO4    4              SDA                 -                    -
 // D3       GPIO0    0 FLASH        -                   -                    Inra-Red
-// D4       GPIO2    2              -                   pin 4 DREQ           -
-// D5       GPIO14  14 SCLK         -                   pin 5 SCK            -
-// D6       GPIO12  12 MISO         -                   pin 7 MISO           -
-// D7       GPIO13  13 MOSI         -                   pin 6 MOSI           -
-// D8       GPIO15  15              -                   pin 2 CS             -
+// D4       GPIO2    2              -                   DREQ                 -
+// D5       GPIO14  14 SCLK         -                   SCK                  -
+// D6       GPIO12  12 MISO         -                   MISO                 -
+// D7       GPIO13  13 MOSI         -                   MOSI                 -
+// D8       GPIO15  15              -                   CS                   -
 // D9       GPI03    3 RXD0         -                   -                    Reserved serial input
 // D10      GPIO1    1 TXD0         -                   -                    Reserved serial output
 // -------  ------  --------------  ---------------     -------------------  ---------------------
-// GND      -        -              pin 8 (GND)         pin 8 GND            Power supply
-// VCC 3.3  -        -              pin 6 (VCC)         -                    LDO 3.3 Volt
-// VCC 5 V  -        -              pin 7 (BL)          pin 9 5V             Power supply
-// RST      -        -              pin 1 (RST)         pin 3 RESET          Reset circuit
+// GND      -        -              GND                 GND                  Power supply
+// 3.3V     -        -              -                   -                    LDO 3.3 Volt
+// -        -        -              VCC                 5V                   Power supply
+// RST      -        -              -                   RESET                Reset circuit
 //
 // The reset circuit is a circuit with 2 diodes to GPIO5 and GPIO16 and a resistor to ground
 // (wired OR gate) because there was not a free GPIO output available for this function.
@@ -78,7 +78,7 @@
 #include <SPI.h>
 
 //Define USELCD if you are using LCD 20x4.
-//#define USELCD
+#define USELCD
 #if defined ( USELCD )
 #include <LiquidCrystal_I2C.h>
 #endif
@@ -89,6 +89,7 @@
 #include "LittleFS.h"
 #include <ArduinoOTA.h>
 #include <TinyXML.h>
+#include <VS1053.h>
 
 extern "C"
 {
@@ -113,9 +114,12 @@ extern "C"
 #define VS1053_CS     15
 #define VS1053_DCS    16
 #define VS1053_DREQ   2
-// Pins CS and DC for TFT module (if used, see definition of "USELCD")
-#define TFT_CS 5
-#define TFT_DC 4
+// Pins SCL and SDA for LCD module (if used, see definition of "USELCD")
+//#define SCL           5
+//#define SDA           4
+#define LCD_ADDR      0x27
+#define LCD_HEIGHT    4 
+#define LCD_LENGTH    20
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
 #define RINGBFSIZ 20000
 // Debug buffer size
@@ -151,7 +155,7 @@ decode_results decodedIRCommand;
 //******************************************************************************************
 // Forward declaration of various functions                                                *
 //******************************************************************************************
-//void   displayinfo ( const char* str, uint16_t pos, uint16_t height, uint16_t color ) ;
+void   displayinfo ( const char *str, int pos, int clr ) ;
 void   showstreamtitle ( const char* ml, bool full = false ) ;
 void   handlebyte ( uint8_t b, bool force = false ) ;
 void   handlebyte_ch ( uint8_t b, bool force = false ) ;
@@ -208,7 +212,7 @@ AsyncMqttClient  mqttclient ;                              // Client for MQTT su
 IPAddress        mqtt_server_IP ;                          // IP address of MQTT broker
 char             cmd[130] ;                                // Command from MQTT or Serial
 #if defined ( USELCD )
-LiquidCrystal_I2C lcd(0x3F, 20, 4);
+  LiquidCrystal_I2C lcd(LCD_ADDR, LCD_LENGTH, LCD_HEIGHT);
 #endif
 Ticker           tckr ;                                    // For timing 100 msec
 TinyXML          xml;                                      // For XML parser.
@@ -276,400 +280,9 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 #include <radio_css.h>
 #include <favicon_ico.h>
 
-//
-//******************************************************************************************
-// VS1053 stuff.  Based on maniacbug library.                                              *
-//******************************************************************************************
-// VS1053 class definition.                                                                *
-//******************************************************************************************
-class VS1053
-{
-  private:
-    uint8_t       cs_pin ;                        // Pin where CS line is connected
-    uint8_t       dcs_pin ;                       // Pin where DCS line is connected
-    uint8_t       dreq_pin ;                      // Pin where DREQ line is connected
-    uint8_t       curvol ;                        // Current volume setting 0..100%
-    const uint8_t vs1053_chunk_size = 32 ;
-    // SCI Register
-    const uint8_t SCI_MODE          = 0x0 ;
-    const uint8_t SCI_BASS          = 0x2 ;
-    const uint8_t SCI_CLOCKF        = 0x3 ;
-    const uint8_t SCI_AUDATA        = 0x5 ;
-    const uint8_t SCI_WRAM          = 0x6 ;
-    const uint8_t SCI_WRAMADDR      = 0x7 ;
-    const uint8_t SCI_AIADDR        = 0xA ;
-    const uint8_t SCI_VOL           = 0xB ;
-    const uint8_t SCI_AICTRL0       = 0xC ;
-    const uint8_t SCI_AICTRL1       = 0xD ;
-    const uint8_t SCI_num_registers = 0xF ;
-    // SCI_MODE bits
-    const uint8_t SM_SDINEW         = 11 ;        // Bitnumber in SCI_MODE always on
-    const uint8_t SM_RESET          = 2 ;         // Bitnumber in SCI_MODE soft reset
-    const uint8_t SM_CANCEL         = 3 ;         // Bitnumber in SCI_MODE cancel song
-    const uint8_t SM_TESTS          = 5 ;         // Bitnumber in SCI_MODE for tests
-    const uint8_t SM_LINE1          = 14 ;        // Bitnumber in SCI_MODE for Line input
-    SPISettings   VS1053_SPI ;                    // SPI settings for this slave
-    uint8_t       endFillByte ;                   // Byte to send when stopping song
-  protected:
-    inline void await_data_request() const
-    {
-      while ( !digitalRead ( dreq_pin ) )
-      {
-        yield() ;                                 // Very short delay
-      }
-    }
-
-    inline void control_mode_on() const
-    {
-      SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
-      digitalWrite ( dcs_pin, HIGH ) ;            // Bring slave in control mode
-      digitalWrite ( cs_pin, LOW ) ;
-    }
-
-    inline void control_mode_off() const
-    {
-      digitalWrite ( cs_pin, HIGH ) ;             // End control mode
-      SPI.endTransaction() ;                      // Allow other SPI users
-    }
-
-    inline void data_mode_on() const
-    {
-      SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
-      digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
-      digitalWrite ( dcs_pin, LOW ) ;
-    }
-
-    inline void data_mode_off() const
-    {
-      digitalWrite ( dcs_pin, HIGH ) ;            // End data mode
-      SPI.endTransaction() ;                      // Allow other SPI users
-    }
-
-    uint16_t read_register ( uint8_t _reg ) const ;
-    void     write_register ( uint8_t _reg, uint16_t _value ) const ;
-    void     sdi_send_buffer ( uint8_t* data, size_t len ) ;
-    void     sdi_send_fillers ( size_t length ) ;
-    void     wram_write ( uint16_t address, uint16_t data ) ;
-    uint16_t wram_read ( uint16_t address ) ;
-
-  public:
-    // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
-    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) ;
-    void     begin() ;                                   // Begin operation.  Sets pins correctly,
-    // and prepares SPI bus.
-    void     startSong() ;                               // Prepare to start playing. Call this each
-    // time a new song starts.
-    void     playChunk ( uint8_t* data, size_t len ) ;   // Play a chunk of data.  Copies the data to
-    // the chip.  Blocks until complete.
-    void     stopSong() ;                                // Finish playing a song. Call this after
-    // the last playChunk call.
-    void     setVolume ( uint8_t vol ) ;                 // Set the player volume.Level from 0-100,
-    // higher is louder.
-    void     setTone ( uint8_t* rtone ) ;                // Set the player baas/treble, 4 nibbles for
-    // treble gain/freq and bass gain/freq
-    uint8_t  getVolume() ;                               // Get the currenet volume setting.
-    // higher is louder.
-    void     printDetails ( const char *header ) ;       // Print configuration details to serial output.
-    void     softReset() ;                               // Do a soft reset
-    bool     testComm ( const char *header ) ;           // Test communication with module
-    inline bool data_request() const
-    {
-      return ( digitalRead ( dreq_pin ) == HIGH ) ;
-    }
-    void     AdjustRate ( long ppm2 ) ;                  // Fine tune the datarate
-} ;
-
-//******************************************************************************************
-// VS1053 class implementation.                                                            *
-//******************************************************************************************
-
-VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) :
-  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin)
-{
-}
-
-uint16_t VS1053::read_register ( uint8_t _reg ) const
-{
-  uint16_t result ;
-
-  control_mode_on() ;
-  SPI.write ( 3 ) ;                                // Read operation
-  SPI.write ( _reg ) ;                             // Register to write (0..0xF)
-  // Note: transfer16 does not seem to work
-  result = ( SPI.transfer ( 0xFF ) << 8 ) |        // Read 16 bits data
-           ( SPI.transfer ( 0xFF ) ) ;
-  await_data_request() ;                           // Wait for DREQ to be HIGH again
-  control_mode_off() ;
-  return result ;
-}
-
-void VS1053::write_register ( uint8_t _reg, uint16_t _value ) const
-{
-  control_mode_on( );
-  SPI.write ( 2 ) ;                                // Write operation
-  SPI.write ( _reg ) ;                             // Register to write (0..0xF)
-  SPI.write16 ( _value ) ;                         // Send 16 bits data
-  await_data_request() ;
-  control_mode_off() ;
-}
-
-void VS1053::sdi_send_buffer ( uint8_t* data, size_t len )
-{
-  size_t chunk_length ;                            // Length of chunk 32 byte or shorter
-
-  data_mode_on() ;
-  while ( len )                                    // More to do?
-  {
-    await_data_request() ;                         // Wait for space available
-    chunk_length = len ;
-    if ( len > vs1053_chunk_size )
-    {
-      chunk_length = vs1053_chunk_size ;
-    }
-    len -= chunk_length ;
-    SPI.writeBytes ( data, chunk_length ) ;
-    data += chunk_length ;
-  }
-  data_mode_off() ;
-}
-
-void VS1053::sdi_send_fillers ( size_t len )
-{
-  size_t chunk_length ;                            // Length of chunk 32 byte or shorter
-
-  data_mode_on() ;
-  while ( len )                                    // More to do?
-  {
-    await_data_request() ;                         // Wait for space available
-    chunk_length = len ;
-    if ( len > vs1053_chunk_size )
-    {
-      chunk_length = vs1053_chunk_size ;
-    }
-    len -= chunk_length ;
-    while ( chunk_length-- )
-    {
-      SPI.write ( endFillByte ) ;
-    }
-  }
-  data_mode_off();
-}
-
-void VS1053::wram_write ( uint16_t address, uint16_t data )
-{
-  write_register ( SCI_WRAMADDR, address ) ;
-  write_register ( SCI_WRAM, data ) ;
-}
-
-uint16_t VS1053::wram_read ( uint16_t address )
-{
-  write_register ( SCI_WRAMADDR, address ) ;            // Start reading from WRAM
-  return read_register ( SCI_WRAM ) ;                   // Read back result
-}
-
-bool VS1053::testComm ( const char *header )
-{
-  // Test the communication with the VS1053 module.  The result wille be returned.
-  // If DREQ is low, there is problably no VS1053 connected.  Pull the line HIGH
-  // in order to prevent an endless loop waiting for this signal.  The rest of the
-  // software will still work, but readbacks from VS1053 will fail.
-  int       i ;                                         // Loop control
-  uint16_t  r1, r2, cnt = 0 ;
-  uint16_t  delta = 300 ;                               // 3 for fast SPI
-
-  if ( !digitalRead ( dreq_pin ) )
-  {
-    dbgprint ( "VS1053 not properly installed!" ) ;
-    // Allow testing without the VS1053 module
-    pinMode ( dreq_pin,  INPUT_PULLUP ) ;               // DREQ is now input with pull-up
-    return false ;                                      // Return bad result
-  }
-  // Further TESTING.  Check if SCI bus can write and read without errors.
-  // We will use the volume setting for this.
-  // Will give warnings on serial output if DEBUG is active.
-  // A maximum of 20 errors will be reported.
-  if ( strstr ( header, "Fast" ) )
-  {
-    delta = 3 ;                                         // Fast SPI, more loops
-  }
-  dbgprint ( header ) ;                                 // Show a header
-  for ( i = 0 ; ( i < 0xFFFF ) && ( cnt < 20 ) ; i += delta )
-  {
-    write_register ( SCI_VOL, i ) ;                     // Write data to SCI_VOL
-    r1 = read_register ( SCI_VOL ) ;                    // Read back for the first time
-    r2 = read_register ( SCI_VOL ) ;                    // Read back a second time
-    if  ( r1 != r2 || i != r1 || i != r2 )              // Check for 2 equal reads
-    {
-      dbgprint ( "VS1053 error retry SB:%04X R1:%04X R2:%04X", i, r1, r2 ) ;
-      cnt++ ;
-      delay ( 10 ) ;
-    }
-    yield() ;                                           // Allow ESP firmware to do some bookkeeping
-  }
-  return ( cnt == 0 ) ;                                 // Return the result
-}
-
-void VS1053::begin()
-{
-  pinMode      ( dreq_pin,  INPUT ) ;                   // DREQ is an input
-  pinMode      ( cs_pin,    OUTPUT ) ;                  // The SCI and SDI signals
-  pinMode      ( dcs_pin,   OUTPUT ) ;
-  digitalWrite ( dcs_pin,   HIGH ) ;                    // Start HIGH for SCI en SDI
-  digitalWrite ( cs_pin,    HIGH ) ;
-  delay ( 100 ) ;
-  dbgprint ( "Reset VS1053..." ) ;
-  digitalWrite ( dcs_pin,   LOW ) ;                     // Low & Low will bring reset pin low
-  digitalWrite ( cs_pin,    LOW ) ;
-  delay ( 2000 ) ;
-  dbgprint ( "End reset VS1053..." ) ;
-  digitalWrite ( dcs_pin,   HIGH ) ;                    // Back to normal again
-  digitalWrite ( cs_pin,    HIGH ) ;
-  delay ( 500 ) ;
-  // Init SPI in slow mode ( 0.2 MHz )
-  VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
-  //printDetails ( "Right after reset/startup" ) ;
-  delay ( 20 ) ;
-  //printDetails ( "20 msec after reset" ) ;
-  testComm ( "Slow SPI,Testing VS1053 read/write registers..." ) ;
-  // Most VS1053 modules will start up in midi mode.  The result is that there is no audio
-  // when playing MP3.  You can modify the board, but there is a more elegant way:
-  wram_write ( 0xC017, 3 ) ;                            // GPIO DDR = 3
-  wram_write ( 0xC019, 0 ) ;                            // GPIO ODATA = 0
-  delay ( 100 ) ;
-  //printDetails ( "After test loop" ) ;
-  softReset() ;                                         // Do a soft reset
-  // Switch on the analog parts
-  write_register ( SCI_AUDATA, 44100 + 1 ) ;            // 44.1kHz + stereo
-  // The next clocksetting allows SPI clocking at 5 MHz, 4 MHz is safe then.
-  write_register ( SCI_CLOCKF, 6 << 12 ) ;              // Normal clock settings multiplyer 3.0 = 12.2 MHz
-  //SPI Clock to 4 MHz. Now you can set high speed SPI clock.
-  VS1053_SPI = SPISettings ( 4000000, MSBFIRST, SPI_MODE0 ) ;
-  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_LINE1 ) ) ;
-  testComm ( "Fast SPI, Testing VS1053 read/write registers again..." ) ;
-  delay ( 10 ) ;
-  await_data_request() ;
-  endFillByte = wram_read ( 0x1E06 ) & 0xFF ;
-  dbgprint ( "endFillByte is %X", endFillByte ) ;
-  //printDetails ( "After last clocksetting" ) ;
-  delay ( 100 ) ;
-}
-
-void VS1053::setVolume ( uint8_t vol )
-{
-  // Set volume.  Both left and right.
-  // Input value is 0..100.  100 is the loudest.
-  // Clicking reduced by using 0xf8 to 0x00 as limits.
-  uint16_t value ;                                      // Value to send to SCI_VOL
-
-  if ( vol != curvol )
-  {
-    curvol = vol ;                                      // Save for later use
-    value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
-    value = ( value << 8 ) | value ;
-    write_register ( SCI_VOL, value ) ;                 // Volume left and right
-  }
-}
-
-void VS1053::setTone ( uint8_t *rtone )                 // Set bass/treble (4 nibbles)
-{
-  // Set tone characteristics.  See documentation for the 4 nibbles.
-  uint16_t value = 0 ;                                  // Value to send to SCI_BASS
-  int      i ;                                          // Loop control
-
-  for ( i = 0 ; i < 4 ; i++ )
-  {
-    value = ( value << 4 ) | rtone[i] ;                 // Shift next nibble in
-  }
-  write_register ( SCI_BASS, value ) ;                  // Tone settings
-  value = read_register ( SCI_BASS ) ;                  // Read back
-  dbgprint ( "BASS settings is %04X", value ) ;         // Print for TEST
-}
-
-uint8_t VS1053::getVolume()                             // Get the currenet volume setting.
-{
-  return curvol ;
-}
-
-void VS1053::startSong()
-{
-  sdi_send_fillers ( 10 ) ;
-}
-
-void VS1053::playChunk ( uint8_t* data, size_t len )
-{
-  sdi_send_buffer ( data, len ) ;
-}
-
-void VS1053::stopSong()
-{
-  uint16_t modereg ;                     // Read from mode register
-  int      i ;                           // Loop control
-
-  sdi_send_fillers ( 2052 ) ;
-  delay ( 10 ) ;
-  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
-  for ( i = 0 ; i < 200 ; i++ )
-  {
-    sdi_send_fillers ( 32 ) ;
-    modereg = read_register ( SCI_MODE ) ;  // Read status
-    if ( ( modereg & _BV ( SM_CANCEL ) ) == 0 )
-    {
-      sdi_send_fillers ( 2052 ) ;
-      dbgprint ( "Song stopped correctly after %d msec", i * 10 ) ;
-      return ;
-    }
-    delay ( 10 ) ;
-  }
-  printDetails ( "Song stopped incorrectly!" ) ;
-}
-
-void VS1053::softReset()
-{
-  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_RESET ) ) ;
-  delay ( 10 ) ;
-  await_data_request() ;
-}
-
-void VS1053::printDetails ( const char *header )
-{
-  uint16_t     regbuf[16] ;
-  uint8_t      i ;
-
-  dbgprint ( header ) ;
-  dbgprint ( "REG   Contents" ) ;
-  dbgprint ( "---   -----" ) ;
-  for ( i = 0 ; i <= SCI_num_registers ; i++ )
-  {
-    regbuf[i] = read_register ( i ) ;
-  }
-  for ( i = 0 ; i <= SCI_num_registers ; i++ )
-  {
-    delay ( 5 ) ;
-    dbgprint ( "%3X - %5X", i, regbuf[i] ) ;
-  }
-}
-
-void VS1053::AdjustRate ( long ppm2 )
-{
-  write_register ( SCI_WRAMADDR, 0x1e07 ) ;
-  write_register ( SCI_WRAM,     ppm2 ) ;
-  write_register ( SCI_WRAM,     ppm2 >> 16 ) ;
-  // oldClock4KHz = 0 forces  adjustment calculation when rate checked.
-  write_register ( SCI_WRAMADDR, 0x5b1c ) ;
-  write_register ( SCI_WRAM,     0 ) ;
-  // Write to AUDATA or CLOCKF checks rate and recalculates adjustment.
-  write_register ( SCI_AUDATA,   read_register ( SCI_AUDATA ) ) ;
-}
-
 
 // The object for the MP3 player
 VS1053 vs1053player (  VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
-
-//******************************************************************************************
-// End VS1053 stuff.                                                                       *
-//******************************************************************************************
-
-
 
 //******************************************************************************************
 // Ringbuffer (fifo) routines.                                                             *
@@ -1129,16 +742,23 @@ void timer100()
 void displayvolume()
 {
 #if defined ( USELCD )
-  static uint8_t oldvol = 0 ;                        // Previous volume
-  uint8_t pos ;                                      // Positon of volume indicator
+  static uint8_t   oldvol = 0 ;                       // Previous volume
+  uint8_t          newvol ;                           // Current setting
+  uint16_t         pos ;                              // Positon of volume indicator
+
   if ( vs1053player.getVolume() != oldvol )
   {
-    pos = map ( vs1053player.getVolume(), 0, 100, 0, 160 ) ;
-
+    oldvol = newvol ;                                 // Remember for next compare
+    pos = map ( newvol, 0, 100, 0, 20 ) ;             // Compute end position on LCD
+    for ( int i=0; i < pos; i++)
+      {
+        lcd.setCursor(i, 3);   
+        lcd.print("#");
+        //lcd.write(0x7F);
+      }
   }
 #endif
 }
-
 
 //******************************************************************************************
 //                              D I S P L A Y I N F O                                      *
@@ -1146,21 +766,20 @@ void displayvolume()
 // Show a string on the LCD at a specified y-position in a specified color                 *
 //******************************************************************************************
 #if defined ( USELCD )
-void displayinfo ( const char* str, uint16_t pos, uint16_t height, uint16_t color )
+void displayinfo ( const char *str, int pos, int clr )
 {
+ if (clr == 1){
+  lcd.clear();
+ }
   char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
-  
   strcpy ( buf, str ) ;                         // Make a local copy of the string
   utf8ascii ( buf ) ;                           // Convert possible UTF8
-  tft.fillRect ( 0, pos, 160, height, BLACK ) ; // Clear the space for new info
-  tft.setTextColor ( color ) ;                  // Set the requested color
-  tft.setCursor ( 0, pos ) ;                    // Prepare to show the info
-  tft.println ( buf ) ;                         // Show the string
+  lcd.setCursor ( 0, pos ) ;                    // Prepare to show the info
+  lcd.print ( buf ) ;                           // Show the string
 }
 #else
 #define displayinfo(a,b,c,d)                    // Empty declaration
 #endif
-
 
 //******************************************************************************************
 //                        S H O W S T R E A M T I T L E                                    *
@@ -1215,7 +834,7 @@ void showstreamtitle ( const char *ml, bool full )
     }
     strcpy ( p1, p2 ) ;                         // Shift 2nd part of title 2 or 3 places
   }
-  displayinfo ( streamtitle, 20, 40, CYAN ) ;   // Show title at position 20
+  displayinfo ( streamtitle, 1, 0 ) ;           // Name of Song & Detail
 }
 
 
@@ -1243,7 +862,6 @@ void stop_mp3client ()
 
 //******************************************************************************************
 //                            C O N N E C T T O H O S T                                    *
-
 //******************************************************************************************
 // Connect to the Internet radio server specified by newpreset.                            *
 //******************************************************************************************
@@ -1257,7 +875,7 @@ bool connecttohost()
 
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
-  displayinfo ( "   ** Internet radio **", 0, 20, WHITE ) ;
+  displayinfo ( "   ** Internet radio **", 0, 1 ) ;
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
   if ( host.endsWith ( ".m3u" ) )                   // Is it an m3u playlist?
@@ -1286,7 +904,7 @@ bool connecttohost()
   }
   pfs = dbgprint ( "Connect to %s on port %d, extension %s",
                    hostwoext.c_str(), port, extension.c_str() ) ;
-  displayinfo ( pfs, 60, 66, YELLOW ) ;             // Show info at position 60..125
+  displayinfo( pfs, 0, 1 ) ;                        // Preset No.
   mp3client = new WiFiClient() ;
   if ( mp3client->connect ( hostwoext.c_str(), port ) )
   {
@@ -1317,9 +935,9 @@ bool connecttofile()
   String path ;                                           // Full file spec
   char*  p ;                                              // Pointer to filename
 
-  displayinfo ( "   **** MP3 Player ****", 0, 20, WHITE ) ;
+  displayinfo ( "   **** MP3 Player ****", 0, 1 ) ;
   path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
-  mp3file = LittleFS.open ( path, "r" ) ;                   // Open the file
+  mp3file = LittleFS.open ( path, "r" ) ;                 // Open the file
   if ( !mp3file )
   {
     dbgprint ( "Error opening file %s", path.c_str() ) ;  // No luck
@@ -1327,8 +945,7 @@ bool connecttofile()
   }
   p = (char*)path.c_str() + 1 ;                           // Point to filename
   showstreamtitle ( p, true ) ;                           // Show the filename as title
-  displayinfo ( "Playing from local file",
-                60, 68, YELLOW ) ;                        // Show Source at position 60
+  displayinfo ( "Playing from local file", 0, 1 ) ;       // Show Source at position 60
   icyname = "" ;                                          // No icy name yet
   chunked = false ;                                       // File not chunked
   return true ;
@@ -1360,7 +977,7 @@ bool connectwifi()
   pfs = dbgprint ( "IP = %d.%d.%d.%d",
                    WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] ) ;
 #if defined ( USELCD )
-  tft.println ( pfs ) ;
+    displayinfo( pfs, 1 ,0 ) ;                         // Show IP address
 #endif
   return true ;
 }
@@ -1930,15 +1547,13 @@ void setup()
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
 #if defined ( USELCD )
-  tft.begin() ;                                        // Init TFT interface
-  tft.fillRect ( 0, 0, 160, 128, BLACK ) ;             // Clear screen does not work when rotated
-  tft.setRotation ( 3 ) ;                              // Use landscape format
-  tft.clearScreen() ;                                  // Clear screen
-  tft.setTextSize ( 1 ) ;                              // Small character font
-  tft.setTextColor ( WHITE ) ;                         // Info in white
-  tft.println ( "Starting" ) ;
-  tft.println ( "Version:" ) ;
-  tft.println ( VERSION ) ;
+  lcd.begin( LCD_LENGTH, LCD_HEIGHT ) ;                // Init LCD interface
+  lcd.setCursor(2, 0);
+  lcd.print ( "Starting" ) ;
+  lcd.setCursor(2, 1);
+  lcd.print ( "Version:" ) ;
+  lcd.setCursor(2, 2);
+  lcd.print ( VERSION ) ;
 #endif
   delay(10);
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
@@ -2061,7 +1676,7 @@ void loop()
     emptyring() ;                                      // Empty the ringbuffer
     datamode = STOPPED ;                               // Yes, state becomes STOPPED
 #if defined ( USELCD )
-    tft.fillRect ( 0, 0, 160, 128, BLACK ) ;           // Clear screen does not work when rotated
+    lcd.clear() ;                                      // Clear screen
 #endif
     delay ( 500 ) ;
   }
@@ -2355,8 +1970,7 @@ void handlebyte ( uint8_t b, bool force )
         {
           icyname = metaline.substring(9) ;            // Get station name
           icyname.trim() ;                             // Remove leading and trailing spaces
-          displayinfo ( icyname.c_str(), 60, 68,
-                        YELLOW ) ;                     // Show station name at position 60
+          displayinfo ( icyname.c_str(), 0, 1 ) ;      // Show station name
         }
         else if ( lcml.startsWith ( "transfer-encoding:" ) )
         {
