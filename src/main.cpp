@@ -113,9 +113,6 @@ extern "C"
 #define VS1053_CS     15
 #define VS1053_DCS    16
 #define VS1053_DREQ   2
-// Pins CS and DC for TFT module (if used, see definition of "USELCD")
-#define TFT_CS 5
-#define TFT_DC 4
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
 #define RINGBFSIZ 20000
 // Debug buffer size
@@ -130,7 +127,7 @@ extern "C"
 #define MAXMQTTCONNECTS 20
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
-#define USEIRRECV
+//#define USEIRRECV
 #if defined ( USEIRRECV )
  // IR receiver pin, 0 for GPIO0 / D3 on NodeMCU. Check for use by other peripherals!
 uint16_t IRRECV_PIN = 0;
@@ -1449,6 +1446,7 @@ void readinifile()
   else
   {
     dbgprint ( "File %s not found, use save command to create one!", INIFILENAME ) ;
+    LittleFS.open ( path, "w" ) ;                     // Create blank config file
   }
 }
 
@@ -1930,15 +1928,7 @@ void setup()
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
 #if defined ( USELCD )
-  tft.begin() ;                                        // Init TFT interface
-  tft.fillRect ( 0, 0, 160, 128, BLACK ) ;             // Clear screen does not work when rotated
-  tft.setRotation ( 3 ) ;                              // Use landscape format
-  tft.clearScreen() ;                                  // Clear screen
-  tft.setTextSize ( 1 ) ;                              // Small character font
-  tft.setTextColor ( WHITE ) ;                         // Info in white
-  tft.println ( "Starting" ) ;
-  tft.println ( "Version:" ) ;
-  tft.println ( VERSION ) ;
+
 #endif
   delay(10);
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
