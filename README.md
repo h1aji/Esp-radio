@@ -33,28 +33,18 @@ This fork is optimised for Platformio and replaced ILI9163C display with LCD 200
 
 ### Wiring
 ```
-ESP pin   - VS1053 pin
-------------------------
-GPIO14    - SCK
-GPIO12    - MISO
-GPIO13    - MOSI
-GPIO16    - DCS
-GPIO02    - DREQ
-          - RST
-GPIO15    - CS
+ESP-12F   VS1053   23LC1024  TSOP4838  LCD2004
+-------   ------   --------  -------   -------
+GPIO14    SCK      SCK
+GPIO12    MISO     MISO
+GPIO13    MOSI     MOSI
+GPIO16    DCS
+GPIO02    DREQ
+          RST
+GPIO15    CS
+GPIO10             CS
+GPIO00                       OUT
+GPIO04                                  SDA
+GPIO05                                  SCL
 ```
 
-Infra-red receiver
-
-```
-GPIO00 - IR
-```
-
-LCD 2004
-
-```
-GPIO04  - SDA
-GPIO05  - SCL
-```
-
-See documentation in pdf-file.
