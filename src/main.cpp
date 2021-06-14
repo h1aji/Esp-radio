@@ -114,9 +114,7 @@ extern "C"
 #define VS1053_CS     15
 #define VS1053_DCS    16
 #define VS1053_DREQ   2
-// Pins SCL and SDA for LCD module (if used, see definition of "USELCD")
-//#define SCL           5
-//#define SDA           4
+// I2C address, length and heigth for LCD module (if used, see definition of "USELCD")
 #define LCD_ADDR      0x27
 #define LCD_HEIGHT    4 
 #define LCD_LENGTH    20
@@ -134,7 +132,7 @@ extern "C"
 #define MAXMQTTCONNECTS 20
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
-#define USEIRRECV
+//#define USEIRRECV
 #if defined ( USEIRRECV )
  // IR receiver pin, 0 for GPIO0 / D3 on NodeMCU. Check for use by other peripherals!
 uint16_t IRRECV_PIN = 0;
@@ -1080,6 +1078,7 @@ void readinifile()
   else
   {
     dbgprint ( "File %s not found, use save command to create one!", INIFILENAME ) ;
+    LittleFS.open ( path, "w" ) ;                     // Create blank config file
   }
 }
 
