@@ -1,95 +1,32 @@
 //******************************************************************************************
-//*  Esp_radio -- Webradio receiver for ESP8266, (color) display and VS1053 MP3 module,    *
+//*  Esp_radio -- Webradio receiver for ESP8266, display and VS1053 MP3 module,            *
 //*               by Ed Smallenburg (ed@smallenburg.nl)                                    *
-//*  With ESP8266 running at 80 MHz, it is capable of handling up to 256 kb bitrate.       *
-//*  With ESP8266 running at 160 MHz, it is capable of handling up to 320 kb bitrate.      *
 //******************************************************************************************
 //
-// A library for the VS1053 (for ESP8266) is not available (or not easy to find).  Therefore
-// a class for this module is derived from the maniacbug library and integrated in this sketch.
-//
-// Compiling: Set SPIFS to 3 MB.  Set IwIP variant to "V1.4 Higher Bandwidth".
-// See http://www.internet-radio.com for suitable stations.  Add the stations of your choice
-// to the .ini-file.
-//
-// Brief description of the program:
-// First a suitable WiFi network is found and a connection is made.
-// Then a connection will be made to a shoutcast server.  The server starts with some
-// info in the header in readable ascii, ending with a double CRLF, like:
-//  icy-name:Classic Rock Florida - SHE Radio
-//  icy-genre:Classic Rock 60s 70s 80s Oldies Miami South Florida
-//  icy-url:http://www.ClassicRockFLorida.com
-//  content-type:audio/mpeg
-//  icy-pub:1
-//  icy-metaint:32768          - Metadata after 32768 bytes of MP3-data
-//  icy-br:128                 - in kb/sec (for Ogg this is like "icy-br=Quality 2"
-//
-// After de double CRLF is received, the server starts sending mp3- or Ogg-data.  For mp3, this
-// data may contain metadata (non mp3) after every "metaint" mp3 bytes.
-// The metadata is empty in most cases, but if any is available the content will be presented on the LCD.
-// Pushing the input button causes the player to select the next preset station present in the .ini file.
-//
-// If no LCD is used, you may use GPIO2 and GPIO15 as control buttons.  See definition of "USELCD" below.
-// Switches are than programmed as:
-// GPIO2 : "Goto station 1"
-// GPIO0 : "Next station"
-// GPIO15: "Previous station".  Note that GPIO15 has to be LOW when starting the ESP8266.
-//         The button for GPIO15 must therefore be connected to VCC (3.3V) instead of GND.
-//
-// For configuration of the WiFi network(s): see the global data section further on.
-//
-// The SPI interface for VS1053 and LCD uses hardware SPI.
-//
-// Wiring:
-// ESP-12F  GPIO    Pin to program  Wired to LCD        Wired to VS1053      Wired to rest
-// -------  ------  --------------  ---------------     -------------------  ---------------------
-// D0       GPIO16  16              -                   DCS                  -
-// D1       GPIO5    5              SCL                 -                    LED on nodeMCU
-// D2       GPIO4    4              SDA                 -                    -
-// D3       GPIO0    0 FLASH        -                   -                    Inra-Red
-// D4       GPIO2    2              -                   DREQ                 -
-// D5       GPIO14  14 SCLK         -                   SCK                  -
-// D6       GPIO12  12 MISO         -                   MISO                 -
-// D7       GPIO13  13 MOSI         -                   MOSI                 -
-// D8       GPIO15  15              -                   CS                   -
-// D9       GPI03    3 RXD0         -                   -                    Reserved serial input
-// D10      GPIO1    1 TXD0         -                   -                    Reserved serial output
-// -------  ------  --------------  ---------------     -------------------  ---------------------
-// GND      -        -              GND                 GND                  Power supply
-// 3.3V     -        -              -                   -                    LDO 3.3 Volt
-// -        -        -              VCC                 5V                   Power supply
-// RST      -        -              -                   RESET                Reset circuit
-//
-// The reset circuit is a circuit with 2 diodes to GPIO5 and GPIO16 and a resistor to ground
-// (wired OR gate) because there was not a free GPIO output available for this function.
-// This circuit is included in the documentation.
-// Issues:
-// Webserver produces error "LmacRxBlk:1" after some time.  After that it will work very slow.
-// The program will reset the ESP8266 in such a case.  Now we have switched to async webserver,
-// the problem still exists, but the program will not crash anymore.
 //
 // Define the version number, also used for webserver as Last-Modified header:
 #define VERSION "Sat, 15 May 2021 09:10:00 GMT"
-
+#define SPIRAM  true                          // Use SPIRAM as ringbuffer. false = do not use
+// Define USELCD if you are using LCD 20x4.
+#define USELCD
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncMqttClient.h>
 #include <SPI.h>
 #include <VS1053.h>
-
-//Define USELCD if you are using LCD 20x4.
-#define USELCD
 #if defined ( USELCD )
 #include <LiquidCrystal_I2C.h>
 #endif
-
 #include <Ticker.h>
 #include <stdio.h>
 #include <string.h>
-#include "LittleFS.h"
 #include <ArduinoOTA.h>
 #include <TinyXML.h>
+#include <LittleFS.h>
+#ifdef SPIRAM
+  #include "spiram.h"
+#endif
 
 extern "C"
 {
@@ -117,8 +54,9 @@ extern "C"
 // Pins SCL and SDA for LCD module (if used, see definition of "USELCD")
 //#define SCL           5
 //#define SDA           4
+// I2C address, length and heigth for LCD module (if used, see definition of "USELCD")
 #define LCD_ADDR      0x27
-#define LCD_HEIGHT    4 
+#define LCD_HEIGHT    4
 #define LCD_LENGTH    20
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
 #define RINGBFSIZ 20000
@@ -136,7 +74,7 @@ extern "C"
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
 #define USEIRRECV
 #if defined ( USEIRRECV )
- // IR receiver pin, 0 for GPIO0 / D3 on NodeMCU. Check for use by other peripherals!
+ // IR receiver pin, 0 for GPIO0
 uint16_t IRRECV_PIN = 0;
 // IRremote button definitions. Read out using Examples->IRremoteESP8266->IRrecvDemo.ino
 #define IRCODEVOLDOWN   0x77E13040
@@ -155,7 +93,7 @@ decode_results decodedIRCommand;
 //******************************************************************************************
 // Forward declaration of various functions                                                *
 //******************************************************************************************
-void   displayinfo ( const char *str, int pos, int clr ) ;
+//void   displayinfo ( const char *str, int pos, int clr ) ;
 void   showstreamtitle ( const char* ml, bool full = false ) ;
 void   handlebyte ( uint8_t b, bool force = false ) ;
 void   handlebyte_ch ( uint8_t b, bool force = false ) ;
@@ -178,7 +116,7 @@ bool   connecttohost() ;
 // Global data section.                                                                    *
 //******************************************************************************************
 // There is a block ini-data that contains some configuration.  Configuration data is      *
-// saved in the LittleFS file radio.ini by the webinterface.  On restart the new data will   *
+// saved in the LittleFS file radio.ini by the webinterface.  On restart the new data will *
 // be read from this file.                                                                 *
 // Items in ini_block can be changed by commands from webserver/MQTT/Serial.               *
 //******************************************************************************************
@@ -211,11 +149,8 @@ AsyncWebServer   cmdserver ( 80 ) ;                        // Instance of embedd
 AsyncMqttClient  mqttclient ;                              // Client for MQTT subscriber
 IPAddress        mqtt_server_IP ;                          // IP address of MQTT broker
 char             cmd[130] ;                                // Command from MQTT or Serial
-#if defined ( USELCD )
-  LiquidCrystal_I2C lcd(LCD_ADDR, LCD_LENGTH, LCD_HEIGHT);
-#endif
 Ticker           tckr ;                                    // For timing 100 msec
-TinyXML          xml;                                      // For XML parser.
+TinyXML          xml ;                                     // For XML parser.
 uint32_t         totalcount = 0 ;                          // Counter mp3 data
 datamode_t       datamode ;                                // State of datastream
 int              metacount ;                               // Number of bytes in metadata
@@ -235,7 +170,7 @@ bool             muteflag = false ;                        // Mute output
 uint8_t*         ringbuf ;                                 // Ringbuffer for VS1053
 uint16_t         rbwindex = 0 ;                            // Fill pointer in ringbuffer
 uint16_t         rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
-uint16_t         rcount = 0 ;                              // Number of bytes in ringbuffer
+uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
 uint16_t         analogsw[NUMANA] = { asw1, asw2, asw3 } ; // 3 levels of analog input
 uint16_t         analogrest ;                              // Rest value of analog input
 bool             resetreq = false ;                        // Request to reset the ESP8266
@@ -247,10 +182,13 @@ uint8_t          num_an ;                                  // Number of acceptab
 String           testfilename = "" ;                       // File to test (LittleFS speed)
 uint16_t         mqttcount = 0 ;                           // Counter MAXMQTTCONNECTS
 int8_t           playlist_num = 0 ;                        // Nonzero for selection from playlist
-File             mp3file  ;                                // File containing mp3 on LittleFS
+File             mp3file ;                                 // File containing mp3 on LittleFS
 bool             localfile = false ;                       // Play from local mp3-file or not
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
+bool             usespiram = SPIRAM ;                      // For check using SPIRAM at runtime
+uint8_t          prcwinx ;                                 // Index in pwchunk (see putring)
+uint8_t          prcrinx ;                                 // Index in prchunk (see getring)
 
 // XML parse globals.
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -280,13 +218,14 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 #include <radio_css.h>
 #include <favicon_ico.h>
 
-//
-//******************************************************************************************
-// VS1053 class definition.                                                                *
-//******************************************************************************************
 
 // The object for the MP3 player
 VS1053 vs1053player (  VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
+
+//  The object for LCD
+#if defined ( USELCD )
+  LiquidCrystal_I2C lcd ( LCD_ADDR, LCD_LENGTH, LCD_HEIGHT ) ;
+#endif
 
 
 //******************************************************************************************
@@ -297,6 +236,10 @@ VS1053 vs1053player (  VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 //******************************************************************************************
 inline bool ringspace()
 {
+  if ( usespiram )
+  {
+    return spaceAvailable() ;         // True if at least 1 chunk available
+  }
   return ( rcount < RINGBFSIZ ) ;     // True is at least one byte of free space is available
 }
 
@@ -306,6 +249,10 @@ inline bool ringspace()
 //******************************************************************************************
 inline uint16_t ringavail()
 {
+  if ( usespiram )
+  {
+    return getFreeBufferSpace() ;     // Return number of chunks available
+  }
   return rcount ;                     // Return number of bytes available
 }
 
@@ -313,31 +260,59 @@ inline uint16_t ringavail()
 //******************************************************************************************
 //                                P U T R I N G                                            *
 //******************************************************************************************
-void putring ( uint8_t b )                 // Put one byte in the ringbuffer
+// No check on available space.  See ringspace()                                           *
+//******************************************************************************************
+void putring ( uint8_t b )              // Put one byte in the ringbuffer
 {
-  // No check on available space.  See ringspace()
-  *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
-  if ( ++rbwindex == RINGBFSIZ )      // Increment pointer and
+  static uint8_t pwchunk[32] ;          // Buffer for one chunk
+
+  if ( usespiram )
   {
-    rbwindex = 0 ;                    // wrap at end
+    pwchunk[prcwinx++] = b ;            // Store in local chunk
+    if ( prcwinx == sizeof(pwchunk) )   // Chunk full?
+    {
+      bufferWrite ( pwchunk ) ;         // Yes, store in SPI RAM
+      prcwinx = 0 ;                     // Index to begin of chunk
+    }
   }
-  rcount++ ;                          // Count number of bytes in the
+  else
+  {
+    *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
+    if ( ++rbwindex == RINGBFSIZ )      // Increment pointer and
+    {
+      rbwindex = 0 ;                    // wrap at end
+    }
+    rcount++ ;                          // Count number of bytes in the
+  }
 }
 
 
 //******************************************************************************************
 //                                G E T R I N G                                            *
 //******************************************************************************************
+// Assume there is always something in the bufferpace.  See ringavail().                   *
+//******************************************************************************************
 uint8_t getring()
 {
-  // Assume there is always something in the bufferpace.  See ringavail()
-  if ( ++rbrindex == RINGBFSIZ )      // Increment pointer and
+  static uint8_t prchunk[32] ;          // Buffer for one chunk
+
+  if ( usespiram )
   {
-    rbrindex = 0 ;                    // wrap at end
+    if ( prcrinx >= sizeof(prchunk) )   // End of buffer reached?
+    {
+      prcrinx = 0 ;                     // Yes, reset index to begin of buffer
+      bufferRead ( prchunk ) ;          // And read new buffer
+    }
+    return ( prchunk[prcrinx++] ) ;
   }
-  rcount-- ;                          // Count is now one less
-  return *(ringbuf + rbrindex) ;      // return the oldest byte
+  if ( ++rbrindex == RINGBFSIZ )        // Increment pointer and
+  {
+    rbrindex = 0 ;                      // wrap at end
+  }
+  rcount-- ;                            // Count is now one less
+  return *(ringbuf + rbrindex) ;        // return the oldest byte
 }
+
 
 //******************************************************************************************
 //                               E M P T Y R I N G                                         *
@@ -347,6 +322,8 @@ void emptyring()
   rbwindex = 0 ;                      // Reset ringbuffer administration
   rbrindex = RINGBFSIZ - 1 ;
   rcount = 0 ;
+  prcwinx = 0 ;
+  prcrinx = 32 ;                      // Set buffer to empty
 }
 
 
@@ -461,7 +438,7 @@ const char* getEncryptionType ( int thisType )
 //                                L I S T N E T W O R K S                                  *
 //******************************************************************************************
 // List the available networks and select the strongest.                                   *
-// Acceptable networks are those who have a "SSID.pw" file in the LittleFS.                  *
+// Acceptable networks are those who have an entry in "anetworks".                         *
 // SSIDs of available networks will be saved for use in webinterface.                      *
 //******************************************************************************************
 void listNetworks()
@@ -621,7 +598,7 @@ void testfile ( String fspec )
   t1 = t0 ;                                            // Prevent uninitialized value
   told = t0 ;                                          // For report
   path = String ( "/" ) + fspec ;                      // Form full path
-  tfile = LittleFS.open ( path, "r" ) ;                  // Open the file
+  tfile = LittleFS.open ( path, "r" ) ;                // Open the file
   if ( tfile )
   {
     len = tfile.available() ;                          // Get file length
@@ -668,7 +645,7 @@ void timer100()
   uint16_t       v ;                              // Analog input value 0..1023
   static uint8_t aoldval = 0 ;                    // Previous value of analog input switch
   uint8_t        anewval ;                        // New value of analog input switch (0..3)
-  uint8_t        oldvol;
+  uint8_t        oldvol ;
 
   if ( ++count10sec == 100  )                     // 10 seconds passed?
   {
@@ -773,13 +750,15 @@ void displayvolume()
 #if defined ( USELCD )
 void displayinfo ( const char *str, int pos, int clr )
 {
- if (clr == 1){
-  lcd.clear();
- }
+ if (clr == 1)
+  {
+   lcd.clear();
+  }
   char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
   strcpy ( buf, str ) ;                         // Make a local copy of the string
   utf8ascii ( buf ) ;                           // Convert possible UTF8
   lcd.setCursor ( 0, pos ) ;                    // Prepare to show the info
+  lcd.autoscroll() ;                            // Set diplay to scroll automatically
   lcd.print ( buf ) ;                           // Show the string
 }
 #else
@@ -840,7 +819,7 @@ void showstreamtitle ( const char *ml, bool full )
     strcpy ( p1, p2 ) ;                         // Shift 2nd part of title 2 or 3 places
   }
   #if defined ( USELCD )
-  displayinfo ( streamtitle, 1, 0 ) ;           // Name of Song & Detail
+  displayinfo ( streamtitle, 0, 1 ) ;           // Name of Song & Detail
   #endif
 }
 
@@ -969,7 +948,7 @@ bool connecttofile()
 //******************************************************************************************
 //                               C O N N E C T W I F I                                     *
 //******************************************************************************************
-// Connect to WiFi using passwords available in the LittleFS.                                *
+// Connect to WiFi using passwords available in the LittleFS.                              *
 // If connection fails, an AP is created and the function returns false.                   *
 //******************************************************************************************
 bool connectwifi()
@@ -1018,17 +997,17 @@ String readhostfrominifile ( int8_t preset )
 {
   String      path ;                                   // Full file spec as string
   File        inifile ;                                // File containing URL with mp3
-  char        tkey[10] ;                               // Key as an array of chars
+  char        tkey[12] ;                               // Key as an array of chars
   String      line ;                                   // Input line from .ini file
   String      linelc ;                                 // Same, but lowercase
   int         inx ;                                    // Position within string
   String      res = "" ;                               // Assume not found
 
   path = String ( INIFILENAME ) ;                      // Form full path
-  inifile = LittleFS.open ( path, "r" ) ;                // Open the file
+  inifile = LittleFS.open ( path, "r" ) ;              // Open the file
   if ( inifile )
   {
-    sprintf ( tkey, "preset_%02d", preset ) ;           // Form the search key
+    sprintf ( tkey, "preset_%02d", preset ) ;          // Form the search key
     while ( inifile.available() )
     {
       line = inifile.readStringUntil ( '\n' ) ;        // Read next line
@@ -1067,7 +1046,7 @@ void readinifile()
   String      line ;                                   // Input line from .ini file
 
   path = String ( INIFILENAME ) ;                      // Form full path
-  inifile = LittleFS.open ( path, "r" ) ;                // Open the file
+  inifile = LittleFS.open ( path, "r" ) ;              // Open the file
   if ( inifile )
   {
     while ( inifile.available() )
@@ -1267,7 +1246,7 @@ void mk_lsan()
   num_an = 0 ;                                         // Count acceptable networks
   anetworks = "|" ;                                    // Initial value
   path = String ( INIFILENAME ) ;                      // Form full path
-  inifile = LittleFS.open ( path, "r" ) ;                // Open the file
+  inifile = LittleFS.open ( path, "r" ) ;              // Open the file
   if ( inifile )
   {
     while ( inifile.available() )
@@ -1315,7 +1294,7 @@ void getpresets()
 
   presetlist = String ( "" ) ;                           // No result yet
   path = String ( INIFILENAME ) ;                        // Form full path
-  inifile = LittleFS.open ( path, "r" ) ;                  // Open the file
+  inifile = LittleFS.open ( path, "r" ) ;                // Open the file
   if ( inifile )
   {
     while ( inifile.available() )
@@ -1518,12 +1497,30 @@ void setup()
   Serial.begin ( 115200 ) ;                            // For debug
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
-  ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;         // Create ring buffer
+  if ( usespiram )                                     // Use SPI RAM?
+  {
+    spiramSetup() ;                                    // Yes, do set-up
+    emptyring() ;                                      // Empty the buffer
+  }
+  else
+  {
+    ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
+  }
   xml.init ( xmlbuffer, sizeof(xmlbuffer),             // Initilize XML stream.
              &XML_callback ) ;
-  memset ( &ini_block, 0, sizeof(ini_block) ) ;        // Init ini_block
-  ini_block.mqttport = 1883 ;                          // Default port for MQTT
-  LittleFS.begin() ;                                     // Enable file system
+  //memset ( &ini_block, 0, sizeof(ini_block) ) ;      // Init ini_block
+  ini_block.mqttbroker = "" ;
+  ini_block.mqttport   = 1883 ;                        // Default port for MQTT
+  ini_block.mqttuser   = "" ;
+  ini_block.mqttpasswd = "" ;
+  ini_block.mqtttopic  = "" ;
+  ini_block.mqttpubtopic = "" ;
+  ini_block.reqvol       = 0 ;
+  memset ( ini_block.rtone, 0, 4 )  ;
+  ini_block.newpreset    = 0 ;
+  ini_block.ssid = "" ;
+  ini_block.passwd = "" ;
+  LittleFS.begin() ;                                   // Enable file system
   // Show some info about the LittleFS
   LittleFS.info ( fs_info ) ;
   dbgprint ( "FS Total %d, used %d", fs_info.totalBytes, fs_info.usedBytes ) ;
@@ -1531,7 +1528,7 @@ void setup()
   {
     dbgprint ( "No LittleFS found!  See documentation." ) ;
   }
-  dir = LittleFS.openDir("/") ;                          // Show files in FS
+  dir = LittleFS.openDir("/") ;                        // Show files in FS
   while ( dir.next() )                                 // All files
   {
     f = dir.openFile ( "r" ) ;
@@ -1556,8 +1553,8 @@ void setup()
   dbgprint ( "Sketch size %d, free size %d",
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;
-#if defined(USEIRRECV)
-  irrecv.enableIRIn(); // Enable IR receiver
+#if defined ( USEIRRECV )
+  irrecv.enableIRIn();                                 // Enable IR receiver
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
 #if defined ( USELCD )
@@ -1797,6 +1794,39 @@ void loop()
 }
 
 
+//**************************************************************************************************
+//                             D E C O D E _ S P E C _ C H A R S                                   *
+//**************************************************************************************************
+// Decode special characters like "&#39;".                                                         *
+//**************************************************************************************************
+String decode_spec_chars ( String str )
+{
+  int    inx, inx2 ;                                // Indexes in string
+  char   c ;                                        // Character from string
+  char   val ;                                      // Converted character
+  String res = str ;
+
+  while ( ( inx = res.indexOf ( "&#" ) ) >= 0 )     // Start sequence in string?
+  {
+    inx2 = res.indexOf ( ";", inx ) ;               // Yes, search for stop character
+    if ( inx2 < 0 )                                 // Stop character found
+    {
+      break ;                                       // Malformed string
+    }
+    res = str.substring ( 0, inx ) ;                // First part
+    inx += 2 ;                                      // skip over start sequence
+    val = 0 ;                                       // Init result of 
+    while ( ( c = str[inx++] ) != ';' )             // Convert character
+    {
+      val = val * 10 + c - '0' ;
+    }
+    res += ( String ( val ) +                       // Add special char to string
+             str.substring ( ++inx2 ) ) ;           // Add rest of string
+  }
+  return res ;
+}
+
+
 //******************************************************************************************
 //                            C H K H D R L I N E                                          *
 //******************************************************************************************
@@ -1984,6 +2014,7 @@ void handlebyte ( uint8_t b, bool force )
         else if ( lcml.startsWith ( "icy-name:" ) )
         {
           icyname = metaline.substring(9) ;            // Get station name
+          icyname = decode_spec_chars ( icyname ) ;    // Decode special characters in name
           icyname.trim() ;                             // Remove leading and trailing spaces
           #if defined ( USELCD )
           displayinfo ( icyname.c_str(), 0, 1 ) ;      // Show station name
@@ -2195,8 +2226,8 @@ void handleFileUpload ( AsyncWebServerRequest *request, String filename,
   if ( index == 0 )
   {
     path = String ( "/" ) + filename ;                // Form LittleFS filename
-    LittleFS.remove ( path ) ;                          // Remove old file
-    f = LittleFS.open ( path, "w" ) ;                   // Create new file
+    LittleFS.remove ( path ) ;                        // Remove old file
+    f = LittleFS.open ( path, "w" ) ;                 // Create new file
     t = millis() ;                                    // Start time
     totallength = 0 ;                                 // Total file lengt still zero
     lastindex = 0 ;                                   // Prepare test
@@ -2227,7 +2258,7 @@ void handleFileUpload ( AsyncWebServerRequest *request, String filename,
 //******************************************************************************************
 //                                H A N D L E F S F                                        *
 //******************************************************************************************
-// Handling of requesting files from the LittleFS/PROGMEM. Example: /favicon.ico             *
+// Handling of requesting files from the LittleFS/PROGMEM. Example: /favicon.ico           *
 //******************************************************************************************
 void handleFSf ( AsyncWebServerRequest* request, const String& filename )
 {
@@ -2279,7 +2310,7 @@ void handleFSf ( AsyncWebServerRequest* request, const String& filename )
 //******************************************************************************************
 //                                H A N D L E F S                                          *
 //******************************************************************************************
-// Handling of requesting files from the LittleFS. Example: /favicon.ico                     *
+// Handling of requesting files from the LittleFS. Example: /favicon.ico                   *
 //******************************************************************************************
 void handleFS ( AsyncWebServerRequest* request )
 {
@@ -2524,6 +2555,10 @@ char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
+    if ( usespiram )                                  // SPI RAM use?
+    {
+      rcount = dataAvailable() ;                      // Yes, get free space
+    }
     sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d",
               system_get_free_heap_size(), rcount, mp3client->available() ) ;
   }
@@ -2664,7 +2699,7 @@ void handleCmd ( AsyncWebServerRequest* request )
     p = request->getParam ( 1 ) ;                       // Get pointer to next parameter structure
     if ( p->isPost() )                                  // Does it have a POST?
     {
-      f = LittleFS.open ( INIFILENAME, "w" ) ;            // Save to inifile
+      f = LittleFS.open ( INIFILENAME, "w" ) ;          // Save to inifile
       if ( f )
       {
         f.print ( p->value() ) ;
