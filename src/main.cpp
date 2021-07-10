@@ -72,7 +72,7 @@ extern "C"
 #define MAXMQTTCONNECTS 20
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
-#define USEIRRECV
+//#define USEIRRECV
 #if defined ( USEIRRECV )
  // IR receiver pin, 0 for GPIO0
 uint16_t IRRECV_PIN = 0;
@@ -1059,6 +1059,7 @@ void readinifile()
   else
   {
     dbgprint ( "File %s not found, use save command to create one!", INIFILENAME ) ;
+    LittleFS.open ( path, "w" ) ;                     // Create blank config file
   }
 }
 
