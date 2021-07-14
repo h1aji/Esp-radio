@@ -8,7 +8,7 @@
 #define VERSION "Sat, 15 May 2021 09:10:00 GMT"
 #define SPIRAM  true                          // Use SPIRAM as ringbuffer. false = do not use
 // Define USELCD if you are using LCD 20x4.
-#define USELCD
+//#define USELCD
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -240,7 +240,10 @@ inline bool ringspace()
   {
     return spaceAvailable() ;         // True if at least 1 chunk available
   }
-  return ( rcount < RINGBFSIZ ) ;     // True is at least one byte of free space is available
+  else
+  {
+    return ( rcount < RINGBFSIZ ) ;     // True is at least one byte of free space is available
+  }
 }
 
 
@@ -253,7 +256,10 @@ inline uint16_t ringavail()
   {
     return getFreeBufferSpace() ;     // Return number of chunks available
   }
-  return rcount ;                     // Return number of bytes available
+  else
+  {
+    return rcount ;                     // Return number of bytes available
+  }
 }
 
 
@@ -305,12 +311,15 @@ uint8_t getring()
     }
     return ( prchunk[prcrinx++] ) ;
   }
-  if ( ++rbrindex == RINGBFSIZ )        // Increment pointer and
+  else
   {
-    rbrindex = 0 ;                      // wrap at end
+    if ( ++rbrindex == RINGBFSIZ )        // Increment pointer and
+    {
+      rbrindex = 0 ;                      // wrap at end
+    }
+    rcount-- ;                            // Count is now one less
+    return *(ringbuf + rbrindex) ;        // return the oldest byte
   }
-  rcount-- ;                            // Count is now one less
-  return *(ringbuf + rbrindex) ;        // return the oldest byte
 }
 
 
@@ -645,7 +654,7 @@ void timer100()
   uint16_t       v ;                              // Analog input value 0..1023
   static uint8_t aoldval = 0 ;                    // Previous value of analog input switch
   uint8_t        anewval ;                        // New value of analog input switch (0..3)
-  uint8_t        oldvol ;
+    uint8_t        oldvol ;
 
   if ( ++count10sec == 100  )                     // 10 seconds passed?
   {
@@ -1059,7 +1068,6 @@ void readinifile()
   else
   {
     dbgprint ( "File %s not found, use save command to create one!", INIFILENAME ) ;
-    LittleFS.open ( path, "w" ) ;                     // Create blank config file
   }
 }
 
