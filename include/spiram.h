@@ -129,57 +129,16 @@ void bufferReset()
 //                                S P I R A M S E T U P                                    *
 //******************************************************************************************
 
-void spiramtest()
-{
-  uint8_t  i ;
-  uint32_t b = random ( 100 ) ;                     // Random fill value
-  uint8_t chunk[32] ;
-
-  for ( i = 0 ; i < sizeof(chunk) ; i++ )           // Fill chunk
-  {
-    chunk[i] = b ;
-  }
-  Serial.printf ( "Chunk filled with value 0x%02X\n", b ) ;
-  for ( i = 0 ; i < 8 ; i++ )                       // Write to SPI ram
-  {
-    if ( spaceAvailable() )
-    {
-      bufferWrite ( chunk ) ;
-    }
-    else
-    {
-      Serial.printf ( "No more space!\n" ) ;
-    }
-  }
-
-  Serial.printf ( "Filled space now is %d chunks\n", dataAvailable() ) ;
-  Serial.printf ( "Free space now is %d chunks\n", getFreeBufferSpace() ) ;
-
-  for ( i = 0 ; i < 8 ; i++ )                       // Read from SPI ram
-  {
-    memset ( chunk, 0, sizeof(chunk) ) ;            // Clear buffer
-    if ( dataAvailable() )
-    {
-      bufferRead ( chunk ) ;
-    }
-    else
-    {
-      Serial.printf ( "No data avavilabel!\n" ) ;
-    }
-  }
-  Serial.printf ( "SPI RAM test complete!\n" ) ;
-}
-
 void spiramSetup()
 {
+  pinMode ( SRAM_CS, OUTPUT ) ;
+  digitalWrite ( SRAM_CS, HIGH ) ;
+
   SPI.begin();
   SPI.setBitOrder  ( MSBFIRST ) ;
   SPI.setDataMode  ( SPI_MODE0 ) ;
   SPI.setFrequency ( SRAM_FREQ ) ;
 
-  pinMode ( SRAM_CS, OUTPUT ) ;
-  digitalWrite ( SRAM_CS, HIGH ) ;
-  delay(50);
   digitalWrite ( SRAM_CS, LOW ) ;
   delay(50);
   digitalWrite ( SRAM_CS, HIGH ) ;
