@@ -16,7 +16,7 @@
 #include <SPI.h>
 #include <VS1053.h>
 #if defined ( USELCD )
-#include <LiquidCrystal_I2C.h>
+  #include <LiquidCrystal_I2C.h>
 #endif
 #include <Ticker.h>
 #include <stdio.h>
@@ -25,7 +25,7 @@
 #include <TinyXML.h>
 #include <LittleFS.h>
 #ifdef SPIRAM
-  #include "spiram.h"
+  #include <ESP8266Spiram.h>                  // https://github.com/Gianbacchio/ESP8266_Spiram
 #endif
 
 extern "C"
@@ -229,6 +229,109 @@ VS1053 vs1053player (  VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 
 
 //******************************************************************************************
+// SPI RAM routines.                                                                       *
+//******************************************************************************************
+// Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
+//******************************************************************************************
+
+#define SRAM_CS        10                   // GPI1O CS pin
+#define SRAM_FREQ    16e6                   // The 23LC1024 supports theorically up to 20MHz
+
+#define SRAM_SIZE  131072                   // Total size SPI ram in bytes
+#define CHUNKSIZE      32                   // Chunk size
+#define SRAM_CH_SIZE 4096                   // Total size SPI ram in chunks
+
+ESP8266Spiram spiram ( SRAM_CS, SRAM_FREQ ) ;
+
+// Global variables
+uint16_t   chcount ;                       // Number of chunks currently in buffer
+uint32_t   readinx ;                       // Read index
+uint32_t   writeinx ;                      // write index
+
+
+//******************************************************************************************
+//                              S P A C E A V A I L A B L E                                *
+//******************************************************************************************
+// Returns true if bufferspace is available.                                               *
+//******************************************************************************************
+bool spaceAvailable()
+{
+  return ( chcount < SRAM_CH_SIZE ) ;
+}
+
+
+//******************************************************************************************
+//                              D A T A A V A I L A B L E                                  *
+//******************************************************************************************
+// Returns the number of full chunks available in the buffer.                              *
+//******************************************************************************************
+uint16_t dataAvailable()
+{
+  return chcount ;
+}
+
+
+//******************************************************************************************
+//                    G E T F R E E B U F F E R S P A C E                                  *
+//******************************************************************************************
+// Return the free buffer space in chunks.                                                 *
+//******************************************************************************************
+uint16_t getFreeBufferSpace()
+{
+  return ( SRAM_CH_SIZE - chcount ) ;                // Return number of chuinks available
+}
+
+
+//******************************************************************************************
+//                             B U F F E R W R I T E                                       *
+//******************************************************************************************
+// Write one chunk (32 bytes) to SPI RAM.                                                  *
+// No check on available space.  See spaceAvailable().                                     *
+//******************************************************************************************
+void bufferWrite ( uint8_t *b )
+{
+  spiram.write ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ; // Put byte in SRAM
+  writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
+  chcount++ ;                                           // Count number of chunks
+}
+
+
+//******************************************************************************************
+//                             B U F F E R R E A D                                         *
+//******************************************************************************************
+// Read one chunk in the user buffer.                                                      *
+// Assume there is always something in the bufferpace.  See dataAvailable()                *
+//******************************************************************************************
+void bufferRead ( uint8_t *b )
+{
+  spiram.read ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // return next chunk
+  readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
+  chcount-- ;                                          // Count is now one less
+}
+
+
+//******************************************************************************************
+//                            B U F F E R R E S E T                                        *
+//******************************************************************************************
+void bufferReset()
+{
+  readinx = 0 ;                                     // Reset ringbuffer administration
+  writeinx = 0 ;
+  chcount = 0 ;
+}
+
+
+//******************************************************************************************
+//                                S P I R A M S E T U P                                    *
+//******************************************************************************************
+void spiramSetup()
+{
+  spiram.begin() ;                                  // Init ESP8266Spiram
+  bufferReset() ;                                   // Reset ringbuffer administration
+}
+
+
+//******************************************************************************************
 // Ringbuffer (fifo) routines.                                                             *
 //******************************************************************************************
 //******************************************************************************************
@@ -242,7 +345,7 @@ inline bool ringspace()
   }
   else
   {
-    return ( rcount < RINGBFSIZ ) ;     // True is at least one byte of free space is available
+    return ( rcount < RINGBFSIZ ) ;   // True is at least one byte of free space is available
   }
 }
 
@@ -254,7 +357,7 @@ inline uint16_t ringavail()
 {
   if ( usespiram )
   {
-    return getFreeBufferSpace() ;     // Return number of chunks available
+    return dataAvailable() ;            // Return number of chunks filled
   }
   else
   {
@@ -313,12 +416,12 @@ uint8_t getring()
   }
   else
   {
-    if ( ++rbrindex == RINGBFSIZ )        // Increment pointer and
+    if ( ++rbrindex == RINGBFSIZ )      // Increment pointer and
     {
-      rbrindex = 0 ;                      // wrap at end
+      rbrindex = 0 ;                    // wrap at end
     }
-    rcount-- ;                            // Count is now one less
-    return *(ringbuf + rbrindex) ;        // return the oldest byte
+    rcount-- ;                          // Count is now one less
+    return *(ringbuf + rbrindex) ;      // return the oldest byte
   }
 }
 
@@ -328,11 +431,17 @@ uint8_t getring()
 //******************************************************************************************
 void emptyring()
 {
-  rbwindex = 0 ;                      // Reset ringbuffer administration
-  rbrindex = RINGBFSIZ - 1 ;
-  rcount = 0 ;
-  prcwinx = 0 ;
-  prcrinx = 32 ;                      // Set buffer to empty
+  if ( usespiram )
+  {
+    prcwinx = 0 ;
+    prcrinx = 32 ;                       // Set buffer to empty
+  }
+  else
+  {
+    rbwindex = 0 ;                      // Reset ringbuffer administration
+    rbrindex = RINGBFSIZ - 1 ;
+    rcount = 0 ;
+  }
 }
 
 
@@ -654,7 +763,7 @@ void timer100()
   uint16_t       v ;                              // Analog input value 0..1023
   static uint8_t aoldval = 0 ;                    // Previous value of analog input switch
   uint8_t        anewval ;                        // New value of analog input switch (0..3)
-    uint8_t        oldvol ;
+  uint8_t        oldvol ;
 
   if ( ++count10sec == 100  )                     // 10 seconds passed?
   {
@@ -1622,6 +1731,23 @@ void setup()
   }
   delay ( 1000 ) ;                                     // Show IP for a while
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
+  if ( usespiram )
+  {
+    dbgprint ( "Testing SPIRAM getring/putring" ) ;
+    for ( int i = 0 ; i < 96 ; i++ )                     // Test for 96 bytes, 3 chunks
+    {
+      putring ( i ) ;                                    // Store in spiram
+      dbgprint ( "Test 1: %d, chunks avl is %d",         // Test, expect 0,0 1,0 2,0 .... 95,3
+                i, ringavail() ) ;
+    }
+    for ( int i = 0 ; i < 96 ; i++ )                     // Test for 100 bytes
+    {
+      uint8_t c = getring() ;                            // Read from spiram
+      dbgprint ( "Test 2: %d, data is %d, ch av is %d",  // Test, expect 0,0,2 1,1,2 2,2,2 .... 95,95,0
+                i, c, ringavail() ) ;
+    }
+    dbgprint ( "Chunks avl is %d", ringavail() ) ;       // Test, expect 0
+  }
 }
 
 
