@@ -3,7 +3,7 @@ Internet radio based on Esp8266 and VS1053.
 This fork is optimised for Platformio and replaced ILI9163C display with LCD 2004
 
 ### NOTES:
-- SRAM support is not yet implemented, any contribution welcome.
+- LCD 2004 support is not yet implemented, any contribution welcome.
 - The radio will NOT play AACP streams.
 
 ### Features:
@@ -23,6 +23,7 @@ This fork is optimised for Platformio and replaced ILI9163C display with LCD 200
 - Heavily commented source code, easy to add extra functionality.
 - Debug information through serial output.
 - 20 kB ring buffer to provide smooth playback.
+- Optional SPI RAM for larger buffer.
 - SPIFFS filesystem used for configuration of WiFi SSIDs, passwords and small MP3-files.
 - Software update over WiFi possible (OTA).
 - Saves volume and preset station over restart.
@@ -32,19 +33,20 @@ This fork is optimised for Platformio and replaced ILI9163C display with LCD 200
 
 
 ### Wiring
-```
-ESP-12F   VS1053   23LC1024  TSOP4838  LCD2004
--------   ------   --------  -------   -------
-GPIO14    SCK      SCK
-GPIO12    MISO     MISO
-GPIO13    MOSI     MOSI
-GPIO16    DCS
-GPIO02    DREQ
-          RST
-GPIO15    CS
-GPIO10             CS
-GPIO00                       OUT
-GPIO04                                  SDA
-GPIO05                                  SCL
-```
 
+|  ESP-12F  |  VS1053  |  23LC1024  |  TSOP4838  |  LCD2004  |
+|-----------|----------|------------|------------|------------
+|  GPIO04   |          |            |            |    SDA    |
+|  GPIO05   |          |            |            |    SCL    |
+|  GPIO00   |          |            |    OUT     |           |
+|  GPIO14   |   SCK    |  SCK       |            |           |
+|  GPIO12   |   MISO   |  SO/SIO1   |            |           |
+|  GPIO13   |   MOSI   |  SI/SIO0   |            |           |
+|  GPIO16   |   DCS    |            |            |           |
+|  GPIO02   |   DREQ   |            |            |           |
+|  GPIO15   |   CS     |            |            |           |
+|  GPIO10   |          |   CS       |            |           |
+
+
+### Schematic
+![diagram](./doc/schema.png)
