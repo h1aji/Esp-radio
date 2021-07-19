@@ -6,9 +6,10 @@
 //
 // Define the version number, also used for webserver as Last-Modified header:
 #define VERSION "Sat, 15 May 2021 09:10:00 GMT"
-#define SPIRAM  true                          // Use SPIRAM as ringbuffer. false = do not use
-// Define USELCD if you are using LCD 20x4.
-//#define USELCD
+// Use SPIRAM as ringbuffer. false = do not use
+#define SPIRAM  true
+// Define USELCD if you are using LCD 20x4
+#define USELCD
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -25,7 +26,7 @@
 #include <TinyXML.h>
 #include <LittleFS.h>
 #ifdef SPIRAM
-  #include <ESP8266Spiram.h>                  // https://github.com/Gianbacchio/ESP8266_Spiram
+  #include <spiram.h>
 #endif
 
 extern "C"
@@ -220,115 +221,12 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 
 
 // The object for the MP3 player
-VS1053 vs1053player (  VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
+VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 
 //  The object for LCD
 #if defined ( USELCD )
   LiquidCrystal_I2C lcd ( LCD_ADDR, LCD_LENGTH, LCD_HEIGHT ) ;
 #endif
-
-
-//******************************************************************************************
-// SPI RAM routines.                                                                       *
-//******************************************************************************************
-// Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
-//******************************************************************************************
-
-#define SRAM_CS        10                   // GPI1O CS pin
-#define SRAM_FREQ    16e6                   // The 23LC1024 supports theorically up to 20MHz
-
-#define SRAM_SIZE  131072                   // Total size SPI ram in bytes
-#define CHUNKSIZE      32                   // Chunk size
-#define SRAM_CH_SIZE 4096                   // Total size SPI ram in chunks
-
-ESP8266Spiram spiram ( SRAM_CS, SRAM_FREQ ) ;
-
-// Global variables
-uint16_t   chcount ;                       // Number of chunks currently in buffer
-uint32_t   readinx ;                       // Read index
-uint32_t   writeinx ;                      // write index
-
-
-//******************************************************************************************
-//                              S P A C E A V A I L A B L E                                *
-//******************************************************************************************
-// Returns true if bufferspace is available.                                               *
-//******************************************************************************************
-bool spaceAvailable()
-{
-  return ( chcount < SRAM_CH_SIZE ) ;
-}
-
-
-//******************************************************************************************
-//                              D A T A A V A I L A B L E                                  *
-//******************************************************************************************
-// Returns the number of full chunks available in the buffer.                              *
-//******************************************************************************************
-uint16_t dataAvailable()
-{
-  return chcount ;
-}
-
-
-//******************************************************************************************
-//                    G E T F R E E B U F F E R S P A C E                                  *
-//******************************************************************************************
-// Return the free buffer space in chunks.                                                 *
-//******************************************************************************************
-uint16_t getFreeBufferSpace()
-{
-  return ( SRAM_CH_SIZE - chcount ) ;                // Return number of chuinks available
-}
-
-
-//******************************************************************************************
-//                             B U F F E R W R I T E                                       *
-//******************************************************************************************
-// Write one chunk (32 bytes) to SPI RAM.                                                  *
-// No check on available space.  See spaceAvailable().                                     *
-//******************************************************************************************
-void bufferWrite ( uint8_t *b )
-{
-  spiram.write ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ; // Put byte in SRAM
-  writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
-  chcount++ ;                                           // Count number of chunks
-}
-
-
-//******************************************************************************************
-//                             B U F F E R R E A D                                         *
-//******************************************************************************************
-// Read one chunk in the user buffer.                                                      *
-// Assume there is always something in the bufferpace.  See dataAvailable()                *
-//******************************************************************************************
-void bufferRead ( uint8_t *b )
-{
-  spiram.read ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // return next chunk
-  readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
-  chcount-- ;                                          // Count is now one less
-}
-
-
-//******************************************************************************************
-//                            B U F F E R R E S E T                                        *
-//******************************************************************************************
-void bufferReset()
-{
-  readinx = 0 ;                                     // Reset ringbuffer administration
-  writeinx = 0 ;
-  chcount = 0 ;
-}
-
-
-//******************************************************************************************
-//                                S P I R A M S E T U P                                    *
-//******************************************************************************************
-void spiramSetup()
-{
-  spiram.begin() ;                                  // Init ESP8266Spiram
-  bufferReset() ;                                   // Reset ringbuffer administration
-}
 
 
 //******************************************************************************************
@@ -859,6 +757,7 @@ void displayvolume()
   }
 #endif
 }
+
 
 //******************************************************************************************
 //                              D I S P L A Y I N F O                                      *
@@ -1803,6 +1702,11 @@ void loop()
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
+    if ( usespiram && ( spiramdelay != 0 ) )           // Delay before reading SPIRAM?
+    {
+      spiramdelay-- ;                                  // Yes, count down
+      break ;                                          // and skip handling of data
+    }
     handlebyte_ch ( getring() ) ;                      // Yes, handle it
   }
   yield() ;
