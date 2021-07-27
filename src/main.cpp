@@ -55,10 +55,12 @@ extern "C"
 // Pins SCL and SDA for LCD module (if used, see definition of "USELCD")
 //#define SCL           5
 //#define SDA           4
-// I2C address, length and heigth for LCD module (if used, see definition of "USELCD")
+// I2C address, rows and columns for LCD module (if used, see definition of "USELCD")
 #define LCD_ADDR      0x27
-#define LCD_HEIGHT    4
-#define LCD_LENGTH    20
+#define LCD_ROWS      4
+#define LCD_COLS      20
+// Delay (in bytes) before reading from SPIRAM
+#define SPIRAMDELAY 200000
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
 #define RINGBFSIZ 20000
 // Debug buffer size
@@ -190,6 +192,7 @@ int              chunkcount = 0 ;                          // Counter for chunke
 bool             usespiram = SPIRAM ;                      // For check using SPIRAM at runtime
 uint8_t          prcwinx ;                                 // Index in pwchunk (see putring)
 uint8_t          prcrinx ;                                 // Index in prchunk (see getring)
+int32_t          spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
 
 // XML parse globals.
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -225,7 +228,7 @@ VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 
 //  The object for LCD
 #if defined ( USELCD )
-  LiquidCrystal_I2C lcd ( LCD_ADDR, LCD_LENGTH, LCD_HEIGHT ) ;
+  LiquidCrystal_I2C lcd ( LCD_ADDR, LCD_COLS, LCD_ROWS ) ;
 #endif
 
 
@@ -255,11 +258,11 @@ inline uint16_t ringavail()
 {
   if ( usespiram )
   {
-    return dataAvailable() ;            // Return number of chunks filled
+    return dataAvailable() ;          // Return number of chunks filled
   }
   else
   {
-    return rcount ;                     // Return number of bytes available
+    return rcount ;                   // Return number of bytes available
   }
 }
 
@@ -741,18 +744,16 @@ void displayvolume()
 {
 #if defined ( USELCD )
   static uint8_t   oldvol = 0 ;                       // Previous volume
-  uint8_t          newvol ;                           // Current setting
   uint16_t         pos ;                              // Positon of volume indicator
 
   if ( vs1053player.getVolume() != oldvol )
   {
-    oldvol = newvol ;                                 // Remember for next compare
-    pos = map ( newvol, 0, 100, 0, 20 ) ;             // Compute end position on LCD
-    for ( int i=0; i < pos; i++)
+    pos = map ( vs1053player.getVolume(), 
+                                  0, 100, 0, 20 ) ;  // Compute end position on LCD
+    for ( int i=0; i < pos; i++ )
       {
-        lcd.setCursor(i, 3);   
-        lcd.print("#");
-        //lcd.write(0x7F);
+        lcd.setCursor ( i, 3 ) ;   
+        lcd.write ( 0xFF );
       }
   }
 #endif
@@ -767,20 +768,17 @@ void displayvolume()
 #if defined ( USELCD )
 void displayinfo ( const char *str, int pos, int clr )
 {
- if (clr == 1)
-  {
-   lcd.clear();
-  }
+  if ( clr == 1 ) { lcd.clear(); }              // Clear screen if needed
   char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
   strcpy ( buf, str ) ;                         // Make a local copy of the string
   utf8ascii ( buf ) ;                           // Convert possible UTF8
   lcd.setCursor ( 0, pos ) ;                    // Prepare to show the info
-  lcd.autoscroll() ;                            // Set diplay to scroll automatically
   lcd.print ( buf ) ;                           // Show the string
 }
 #else
 #define displayinfo(a,b,c)                      // Empty declaration
 #endif
+
 
 //******************************************************************************************
 //                        S H O W S T R E A M T I T L E                                    *
@@ -835,9 +833,7 @@ void showstreamtitle ( const char *ml, bool full )
     }
     strcpy ( p1, p2 ) ;                         // Shift 2nd part of title 2 or 3 places
   }
-  #if defined ( USELCD )
-  displayinfo ( streamtitle, 0, 1 ) ;           // Name of Song & Detail
-  #endif
+  displayinfo ( streamtitle, 1, 0 ) ;           // Name of Song & Detail
 }
 
 
@@ -878,9 +874,7 @@ bool connecttohost()
 
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
-  #if defined ( USELCD )
-    displayinfo ( "   ** Internet radio **", 0, 1 ) ;
-  #endif
+  displayinfo ( "** Internet radio **", 1, 1 ) ;
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
   if ( host.endsWith ( ".m3u" ) )                   // Is it an m3u playlist?
@@ -909,9 +903,7 @@ bool connecttohost()
   }
   pfs = dbgprint ( "Connect to %s on port %d, extension %s",
                    hostwoext.c_str(), port, extension.c_str() ) ;
-  #if defined ( USELCD )
-  displayinfo( pfs, 0, 1 ) ;                        // Preset No.
-  #endif
+  displayinfo ( pfs, 2, 1 ) ;                       // Preset No.
   mp3client = new WiFiClient() ;
   if ( mp3client->connect ( hostwoext.c_str(), port ) )
   {
@@ -941,9 +933,7 @@ bool connecttofile()
 {
   String path ;                                           // Full file spec
   char*  p ;                                              // Pointer to filename
-  #if defined ( USELCD )
-  displayinfo ( "   **** MP3 Player ****", 0, 1 ) ;
-  #endif
+  displayinfo ( "**** MP3 Player ****", 1, 1 ) ;
   path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
   mp3file = LittleFS.open ( path, "r" ) ;                 // Open the file
   if ( !mp3file )
@@ -953,9 +943,7 @@ bool connecttofile()
   }
   p = (char*)path.c_str() + 1 ;                           // Point to filename
   showstreamtitle ( p, true ) ;                           // Show the filename as title
-  #if defined ( USELCD )
-  displayinfo ( "Playing from local file", 0, 1 ) ;       // Show Source at position 60
-  #endif
+  displayinfo ( "Playing from local file", 2, 1 ) ;       // Show Source at position 60
   icyname = "" ;                                          // No icy name yet
   chunked = false ;                                       // File not chunked
   return true ;
@@ -986,9 +974,7 @@ bool connectwifi()
   }
   pfs = dbgprint ( "IP = %d.%d.%d.%d",
                    WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] ) ;
-#if defined ( USELCD )
-    displayinfo( pfs, 1 ,0 ) ;                         // Show IP address
-#endif
+  displayinfo( pfs, 1, 1 ) ;                         // Show IP address
   return true ;
 }
 
@@ -1575,13 +1561,13 @@ void setup()
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
 #if defined ( USELCD )
-  lcd.begin( LCD_LENGTH, LCD_HEIGHT ) ;
+  lcd.begin ( LCD_COLS, LCD_ROWS ) ;
   lcd.init();                                          // Init LCD interface
   lcd.backlight();                                     // Turn on the backlight.
-  lcd.setCursor(0, 0);
+  lcd.setCursor ( 0, 1 ) ;
   lcd.print ( VERSION ) ;
   delay(1000);
-  lcd.setCursor(0, 1);
+  lcd.setCursor ( 0, 2 ) ;
   lcd.print ( "Starting" ) ;
 #endif
   delay(10);
@@ -2055,9 +2041,7 @@ void handlebyte ( uint8_t b, bool force )
           icyname = metaline.substring(9) ;            // Get station name
           icyname = decode_spec_chars ( icyname ) ;    // Decode special characters in name
           icyname.trim() ;                             // Remove leading and trailing spaces
-          #if defined ( USELCD )
-          displayinfo ( icyname.c_str(), 0, 1 ) ;      // Show station name
-          #endif
+          displayinfo ( icyname.c_str(), 1, 1 ) ;      // Show station name
         }
         else if ( lcml.startsWith ( "transfer-encoding:" ) )
         {

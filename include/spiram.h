@@ -7,22 +7,19 @@
 
 #include <ESP8266Spiram.h>                  // https://github.com/Gianbacchio/ESP8266_Spiram
 
-#define SRAM_CS        10                   // GPI1O CS pin
+#define SRAM_CS        10                   // GPIO1O CS pin
 #define SRAM_FREQ    16e6                   // The 23LC1024 supports theorically up to 20MHz
 
 #define SRAM_SIZE  131072                   // Total size SPI ram in bytes
 #define CHUNKSIZE      32                   // Chunk size
 #define SRAM_CH_SIZE 4096                   // Total size SPI ram in chunks
-#define SPIRAMDELAY 200000                  // Delay (in bytes) before reading from SPIRAM
-
-ESP8266Spiram spiram ( SRAM_CS, SRAM_FREQ ) ;
 
 // Global variables
 uint16_t   chcount ;                       // Number of chunks currently in buffer
 uint32_t   readinx ;                       // Read index
 uint32_t   writeinx ;                      // write index
-int32_t    spiramdelay = SPIRAMDELAY ;     // Delay before reading from SPIRAM
 
+ESP8266Spiram spiram ( SRAM_CS, SRAM_FREQ ) ;
 
 //******************************************************************************************
 //                              S P A C E A V A I L A B L E                                *
