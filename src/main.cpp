@@ -305,14 +305,9 @@ LCD2004* lcd = NULL ;
 bool dsp_begin()
 {
   dbgprint ( "Init LCD2004, I2C pins %d,%d", SDA_PIN, SCL_PIN ) ;
-
-  Wire.begin ( SDA_PIN, SCL_PIN ) ;
-  delay (10);
-  Wire.beginTransmission ( I2C_ADDRESS ) ;
-  if (Wire.endTransmission () == 0)
+  if ( ( SDA_PIN >= 0 ) && ( SCL_PIN >= 0 ) )
   {
     lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;               // Create an instance for LCD
-    dbgprint ( "Init LCD2004 successful!" ) ;
   }
   else
   {
