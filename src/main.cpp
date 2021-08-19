@@ -7,7 +7,7 @@
 // Define the version number, also used for webserver as Last-Modified header:
 #define VERSION "Sat, 15 May 2021 09:10:00 GMT"
 // Use SPIRAM as ringbuffer. false = do not use
-#define SPIRAM  true
+#define SPIRAM false
 // Define USELCD if you are using LCD 20x4
 #define USELCD
 #include <ESP8266WiFi.h>
@@ -17,7 +17,7 @@
 #include <SPI.h>
 #include <VS1053.h>
 #if defined ( USELCD )
-  #include <LiquidCrystal_I2C.h>
+  #include <Wire.h>
 #endif
 #include <Ticker.h>
 #include <stdio.h>
@@ -52,13 +52,45 @@ extern "C"
 #define VS1053_CS     15
 #define VS1053_DCS    16
 #define VS1053_DREQ   2
-// Pins SCL and SDA for LCD module (if used, see definition of "USELCD")
-//#define SCL           5
-//#define SDA           4
-// I2C address, rows and columns for LCD module (if used, see definition of "USELCD")
-#define LCD_ADDR      0x27
-#define LCD_ROWS      4
-#define LCD_COLS      20
+// Pins for LCD 2004
+#define SDA_PIN 4
+#define SCL_PIN 5
+// Adjust for your display
+#define I2C_ADDRESS 0x27
+// Enable ACK for I2C communication
+#define ACKENA      true
+//
+#define DELAY_ENABLE_PULSE_SETTLE           50               // Command requires > 37us to settle
+#define FLAG_BACKLIGHT_ON                   0b00001000       // Bit 3, backlight enabled (disabled if clear)
+#define FLAG_ENABLE                         0b00000100       // Bit 2, Enable
+#define FLAG_RS_DATA                        0b00000001       // Bit 0, RS=data (command if clear)
+#define FLAG_RS_COMMAND                     0b00000000       // Command
+//
+#define COMMAND_BACKLIGHT_ON                0x01
+#define COMMAND_BACKLIGHT_OFF               0x00
+//
+#define COMMAND_CLEAR_DISPLAY               0x01
+#define COMMAND_RETURN_HOME                 0x02
+#define COMMAND_ENTRY_MODE_SET              0x04
+#define COMMAND_DISPLAY_CONTROL             0x08
+#define COMMAND_FUNCTION_SET                0x20
+#define COMMAND_SET_DDRAM_ADDR              0x80
+//
+#define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
+#define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
+//
+#define FLAG_FUNCTION_SET_MODE_4BIT         0x00
+#define FLAG_FUNCTION_SET_LINES_2           0x08
+#define FLAG_FUNCTION_SET_DOTS_5X8          0x00
+//
+#define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
+#define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
+//
+#define dsp_print(a)                                               // Print a string 
+#define dsp_setCursor(a,b)                                         // Position the cursor
+#define dsp_getwidth()      20                                     // Get width of screen
+#define dsp_getheight()     4                                      // Get height of screen
+//
 // Delay (in bytes) before reading from SPIRAM
 #define SPIRAMDELAY 200000
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
@@ -75,17 +107,17 @@ extern "C"
 #define MAXMQTTCONNECTS 20
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
-//#define USEIRRECV
+#define USEIRRECV
 #if defined ( USEIRRECV )
  // IR receiver pin, 0 for GPIO0
 uint16_t IRRECV_PIN = 0;
 // IRremote button definitions. Read out using Examples->IRremoteESP8266->IRrecvDemo.ino
-#define IRCODEVOLDOWN   0x77E13040
-#define IRCODEVOLUP     0x77E15040
-#define IRCODEPREV      0x77E19040
-#define IRCODENEXT      0x77E16040
-#define IRCODEHOME      0x77E1C040
-#define IRCODEMUTE      0x77E1A040
+#define IRCODEVOLDOWN   0xFFA857
+#define IRCODEVOLUP     0xFF906F
+#define IRCODEPREV      0xFF02FD
+#define IRCODENEXT      0xFFC23D
+#define IRCODEHOME      0xFF629D
+#define IRCODEMUTE      0xFFE21D
 #include <IRremoteESP8266.h>
 #include <IRrecv.h>
 #include <IRutils.h>
@@ -193,6 +225,7 @@ bool             usespiram = SPIRAM ;                      // For check using SP
 uint8_t          prcwinx ;                                 // Index in pwchunk (see putring)
 uint8_t          prcrinx ;                                 // Index in prchunk (see getring)
 int32_t          spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
+bool             scrollflag = false ;                      // Request to scroll LCD
 
 // XML parse globals.
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -226,9 +259,464 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 // The object for the MP3 player
 VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 
-//  The object for LCD
 #if defined ( USELCD )
-  LiquidCrystal_I2C lcd ( LCD_ADDR, LCD_COLS, LCD_ROWS ) ;
+//***************************************************************************************************
+//*  LCD2004.h -- Driver for LCD 2004 display with I2C backpack.                                    *
+//***************************************************************************************************
+// The backpack communicates with the I2C bus and converts the serial data to parallel for the      *
+// 2004 board.  In the serial data, the 8 bits are assigned as follows:                             *
+// Bit   Destination  Description                                                                   *
+// ---   -----------  ------------------------------------                                          *
+//  0    RS           H=data, L=command                                                             *
+//  1    RW           H=read, L=write.  Only write is used.                                         *
+//  2    E            Enable                                                                        *
+//  3    BL           Backlight, H=on, L=off.  Always on.                                           *
+//  4    D4           Data bit 4                                                                    *
+//  5    D5           Data bit 5                                                                    *
+//  6    D6           Data bit 6                                                                    *
+//  7    D7           Data bit 7                                                                    *
+//***************************************************************************************************
+//
+// Note that the display function are limited due to the minimal available space.
+
+class LCD2004
+{
+  public:
+                     LCD2004 ( uint8_t sda, uint8_t scl ) ; // Constructor
+    void             print ( char c ) ;                     // Send 1 char
+    void             reset() ;                              // Perform reset
+    void             sclear() ;                             // Clear the screen
+    void             shome() ;                              // Go to home position
+    void             scursor ( uint8_t col, uint8_t row ) ; // Position the cursor
+    void             scroll ( bool son ) ;                  // Set scroll on/off
+  private:
+    void             scommand ( uint8_t cmd ) ;
+    void             strobe ( uint8_t cmd ) ;
+    void             swrite ( uint8_t val, uint8_t rs ) ;
+    void             write_cmd ( uint8_t val ) ;
+    void             write_data ( uint8_t val ) ;
+    uint8_t          bl  = FLAG_BACKLIGHT_ON ;              // Backlight in every command
+    uint8_t          xchar = 0 ;                            // Current cursor position (text)
+    uint8_t          ychar = 0 ;                            // Current cursor position (text)
+} ;
+
+LCD2004* lcd = NULL ;
+
+bool dsp_begin()
+{
+  dbgprint ( "Init LCD2004, I2C pins %d,%d", SDA_PIN, SCL_PIN ) ;
+
+  Wire.begin ( SDA_PIN, SCL_PIN ) ;
+  delay (10);
+  Wire.beginTransmission ( I2C_ADDRESS ) ;
+  if (Wire.endTransmission () == 0)
+  {
+    lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;               // Create an instance for LCD
+    dbgprint ( "Init LCD2004 successful!" ) ;
+  }
+  else
+  {
+    dbgprint ( "Init LCD2004 failed!" ) ;
+  }
+  return ( lcd != NULL ) ;
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4  write functions                                *
+//***********************************************************************************************
+// Write functins for command, data and general.                                                *
+//***********************************************************************************************
+void LCD2004::swrite ( uint8_t val, uint8_t rs )          // General write, 8 bits data
+{
+  strobe ( ( val & 0xf0 ) | rs ) ;                        // Send 4 LSB bits
+  strobe ( ( val << 4 ) | rs ) ;                          // Send 4 MSB bits
+}
+
+
+void LCD2004::write_data ( uint8_t val )
+{
+  swrite ( val, FLAG_RS_DATA ) ;                           // Send data (RS = HIGH)
+}
+
+
+void LCD2004::write_cmd ( uint8_t val )
+{
+  swrite ( val, FLAG_RS_COMMAND ) ;                        // Send command (RS = LOW)
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S T R O B E                                  *
+//***********************************************************************************************
+// Send data followed by strobe to clock data to LCD.                                           *
+//***********************************************************************************************
+void LCD2004::strobe ( uint8_t cmd )
+{
+  scommand ( cmd | FLAG_ENABLE ) ;                  // Send command with E high
+  scommand ( cmd ) ;                                // Same command with E low
+  delayMicroseconds ( DELAY_ENABLE_PULSE_SETTLE ) ; // Wait a short time
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S C O M M A N D                              *
+//***********************************************************************************************
+// Send a command to the LCD.                                                                   *
+// Actual I/O.  Open a channel to the I2C interface and write one byte.                         *
+//***********************************************************************************************
+void LCD2004::scommand ( uint8_t cmd )
+{
+  Wire.beginTransmission(I2C_ADDRESS);
+	Wire.write((int)(cmd) | COMMAND_BACKLIGHT_ON);
+	Wire.endTransmission();
+  delayMicroseconds(1);		                        // enable pulse must be >450ns
+  Wire.beginTransmission(I2C_ADDRESS);
+	Wire.write((int)(cmd) | COMMAND_BACKLIGHT_OFF);
+	Wire.endTransmission();
+  delayMicroseconds(50);		                      // commands need > 37us to settle
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: P R I N T                                    *
+//***********************************************************************************************
+// Put a character in the buffer.                                                               *
+//***********************************************************************************************
+void LCD2004::print ( char c )
+{
+  write_data ( c ) ;
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S C U R S O R                                *
+//***********************************************************************************************
+// Place the cursor at the requested position.                                                  *
+//***********************************************************************************************
+void LCD2004::scursor ( uint8_t col, uint8_t row )
+{
+  const int row_offsets[] = { 0x00, 0x40, 0x14, 0x54 } ;
+  
+  write_cmd ( COMMAND_SET_DDRAM_ADDR |
+              ( col + row_offsets[row] ) ) ; 
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S C L E A R                                  *
+//***********************************************************************************************
+// Clear the LCD.                                                                               *
+//***********************************************************************************************
+void LCD2004::sclear()
+{
+  write_cmd ( COMMAND_CLEAR_DISPLAY ) ;
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S C R O L L                                  *
+//***********************************************************************************************
+// Set scrolling on/off.                                                                        *
+//***********************************************************************************************
+void LCD2004::scroll ( bool son )
+{
+  uint8_t ecmd = COMMAND_ENTRY_MODE_SET |               // Assume no scroll
+                 FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT ;
+
+  if ( son )                                            // Scroll on?
+  {
+    ecmd |= FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON ;        // Yes, change function
+  }
+  write_cmd ( ecmd ) ;                                  // Perform command
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S H O M E                                    *
+//***********************************************************************************************
+// Go to home position.                                                                         *
+//***********************************************************************************************
+void LCD2004::shome()
+{
+  write_cmd ( COMMAND_RETURN_HOME ) ;
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: R E S E T                                    *
+//***********************************************************************************************
+// Reset the LCD.                                                                               *
+//***********************************************************************************************
+void LCD2004::reset()
+{
+  scommand ( 0 ) ;                                // Put expander to known state
+  delayMicroseconds ( 1000 ) ;
+  for ( int i = 0 ; i < 3 ; i++ )                 // Repeat 3 times
+  {
+    strobe ( 0x03 << 4 ) ;                        // Select 4-bit mode
+    delayMicroseconds ( 4500 ) ;
+  }
+  strobe ( 0x02 << 4 ) ;                          // 4-bit
+  delayMicroseconds ( 4500 ) ;
+  write_cmd ( COMMAND_FUNCTION_SET |
+              FLAG_FUNCTION_SET_MODE_4BIT |
+              FLAG_FUNCTION_SET_LINES_2 |
+              FLAG_FUNCTION_SET_DOTS_5X8 ) ;
+  write_cmd ( COMMAND_DISPLAY_CONTROL |
+              FLAG_DISPLAY_CONTROL_DISPLAY_ON ) ;
+  sclear() ;
+  write_cmd ( COMMAND_ENTRY_MODE_SET |
+              FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT ) ;
+  shome() ;
+  for ( char a = 'a' ; a < 'q' ; a++ )
+  {
+    print ( a ) ;
+  }
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4                                                 *
+//***********************************************************************************************
+// Constructor for the display.                                                                 *
+//***********************************************************************************************
+LCD2004::LCD2004 ( uint8_t sda, uint8_t scl )
+{
+  Wire.begin ( sda, scl ) ;
+  delay(10);
+  Wire.setClock ( 100000UL ) ;                        //experimental! ESP8266 i2c bus speed: 100kHz..400kHz/100000UL..400000UL, default 100000UL
+  Wire.setClockStretchLimit ( 230 ) ;                 //experimental! default 230
+  Wire.beginTransmission ( I2C_ADDRESS ) ;
+  if ( Wire.endTransmission() != 0 )
+  {
+    dbgprint ( "param_config error!" ) ;              //safety check, make sure the PCF8574 is connected
+  }
+  reset() ;
+}
+
+struct dsp_str
+{
+  String          str ;
+  uint16_t        len ;                                 // Length of string to show
+  uint16_t        pos ;                                 // Start on this position of string
+  uint8_t         row ;                                 // Row on display  
+} ;
+
+dsp_str dline[4] = { { "", 0, 0, 0 },
+                     { "", 0, 0, 0 },
+                     { "", 0, 0, 0 },
+                     { "", 0, 0, 0 }
+                   } ;
+
+//***********************************************************************************************
+//                                D S P _U P D A T E _ L I N E                                  *
+//***********************************************************************************************
+// Show a selected line                                                                         *
+//***********************************************************************************************
+void dsp_update_line ( uint8_t lnr )
+{
+  uint8_t         i ;                                   // Index in string
+  const char*     p ;
+
+  p = dline[lnr].str.c_str() ;
+  dline[lnr].len = strlen ( p ) ;
+  //dbgprint ( "Strlen is %d, str is %s", len, p ) ;
+  if ( dline[lnr].len > dsp_getwidth() )
+  {
+    if ( dline[lnr].pos >= dline[lnr].len )
+    {
+      dline[lnr].pos = 0 ;
+    }
+    else
+    {
+      p += dline[lnr].pos ;
+    }
+    dline[lnr].len -= dline[lnr].pos ;
+    if ( dline[lnr].len > dsp_getwidth() )
+    {
+      dline[lnr].len = dsp_getwidth() ;
+    }
+  }
+  else
+  {
+    dline[lnr].pos = 0 ;                             // String fits on screen
+  }
+  dline[lnr].pos++ ;
+  lcd->scursor ( 0, lnr ) ;
+  for ( i = 0 ; i < dline[lnr].len ; i++ )
+  {
+    if ( ( *p >= ' ' ) && ( *p <= '~' ) )            // Printable?
+    {
+      lcd->print ( *p ) ;                            // Yes
+    }
+    else
+    {
+      lcd->print ( ' ' ) ;                           // Yes, print space
+    }
+    p++ ;
+  }
+  for ( i = 0 ; i < ( dsp_getwidth() - dline[lnr].len ) ; i++ )  // Fill remainder
+  {
+    lcd->print ( ' ' ) ;
+  }
+  if ( *p == '\0' )                                  // At end of line?
+  {
+    dline[lnr].pos = 0 ;                             // Yes, start allover
+  }
+}
+
+
+//***********************************************************************************************
+//                                D S P _U P D A T E                                            *
+//***********************************************************************************************
+// Show a selection of the 4 sections                                                           *
+//***********************************************************************************************
+void dsp_update()
+{
+  static uint16_t cnt = 0 ;                             // Reduce updates
+
+  if ( cnt++ != 8 )                                     // Action every 8 calls
+  {
+    return ;
+  }
+  cnt = 0 ;
+//  if ( enc_menu_mode != VOLUME )                        // Encoder menu mode?
+//  {
+//    dline[1].str = tftdata[3].str.substring(0,dsp_getwidth()) ;     // Yes, different lines
+//    dline[2].str = tftdata[3].str.substring(dsp_getwidth()) ;
+//  }
+//  else
+//  {
+//    dline[2].str = tftdata[1].str ;                     // Local copy
+//    dline[1].str = tftdata[2].str ;                     // Local copy
+//  }  
+  dline[2].str.trim() ;                                 // Remove non printing
+  dline[1].str.trim() ;                                 // Remove non printing
+  if ( dline[2].str.length() > dsp_getwidth() )
+  {
+    dline[2].str += String ( "  " ) ;
+  }
+  if ( dline[1].str.length() > dsp_getwidth() )
+  {
+    dline[1].str += String ( "  " ) ;
+  }
+  dsp_update_line ( 1 ) ;
+  dsp_update_line ( 2 ) ;
+}
+
+
+//**************************************************************************************************
+//                                      D I S P L A Y V O L U M E                                  *
+//**************************************************************************************************
+// Display volume for this type of display.                                                        *
+// line 3 will be used.                                                                            *
+//**************************************************************************************************
+void displayvolume()
+{
+  static uint8_t   oldvol = 0 ;                       // Previous volume
+  uint8_t          newvol ;                           // Current setting
+  uint16_t         pos ;                              // Positon of volume indicator
+
+  dline[3].str = "";
+
+  newvol = vs1053player.getVolume() ;                // Get current volume setting
+  if ( newvol != oldvol )                             // Volume changed?
+  {
+    oldvol = newvol ;                                 // Remember for next compare
+    pos = map ( newvol, 0, 100, 0, dsp_getwidth() ) ; // Compute end position on TFT
+    for ( int i = 0 ; i < dsp_getwidth() ; i++ )      // Set oldstr to dots
+    {
+      if ( i <= pos )
+      {
+        dline[3].str += "\xFF" ;                      // Add block character
+      }
+      else
+      {
+        dline[3].str += " " ;                         // Or blank sign
+      }
+    }
+    dsp_update_line ( 3 ) ;
+  }
+}
+
+
+//******************************************************************************************
+//                              U T F 8 A S C I I                                          *
+//******************************************************************************************
+// UTF8-Decoder: convert UTF8-string to extended ASCII.                                    *
+// Convert a single Character from UTF8 to Extended ASCII.                                 *
+// Return "0" if a byte has to be ignored.                                                 *
+//******************************************************************************************
+byte utf8ascii ( byte ascii )
+{
+  static const byte lut_C3[] = 
+         { "AAAAAAACEEEEIIIIDNOOOOO#0UUUU###aaaaaaaceeeeiiiidnooooo##uuuuyyy" } ;
+  static byte       c1 ;              // Last character buffer
+  byte              res = 0 ;         // Result, default 0
+
+  if ( ascii <= 0x7F )                // Standard ASCII-set 0..0x7F handling
+  {
+    c1 = 0 ;
+    res = ascii ;                     // Return unmodified
+  }
+  else
+  {
+    switch ( c1 )                     // Conversion depending on first UTF8-character
+    {   
+      case 0xC2: res = '~' ;
+                 break ;
+      case 0xC3: res = lut_C3[ascii-128] ;
+                 break ;
+      case 0x82: if ( ascii == 0xAC )
+                 {
+                    res = 'E' ;       // Special case Euro-symbol
+                 }
+    }
+    c1 = ascii ;                      // Remember actual character
+  }
+  return res ;                        // Otherwise: return zero, if character has to be ignored
+}
+
+
+//******************************************************************************************
+//                              U T F 8 A S C I I                                          *
+//******************************************************************************************
+// In Place conversion UTF8-string to Extended ASCII (ASCII is shorter!).                  *
+//******************************************************************************************
+void utf8ascii ( char* s )
+{
+  int  i, k = 0 ;                     // Indexes for in en out string
+  char c ;
+
+  for ( i = 0 ; s[i] ; i++ )          // For every input character
+  {
+    c = utf8ascii ( s[i] ) ;          // Translate if necessary
+    if ( c )                          // Good translation?
+    {
+      s[k++] = c ;                    // Yes, put in output string
+    }
+  }
+  s[k] = 0 ;                          // Take care of delimeter
+}
+
+
+//******************************************************************************************
+//                              D I S P L A Y I N F O                                      *
+//******************************************************************************************
+// Show a string on the LCD at a specified y-position in a specified color                 *
+//******************************************************************************************
+void displayinfo ( const char *str, int pos, int clr )
+{
+  char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
+
+  strcpy ( buf, str ) ;                         // Make a local copy of the string
+  utf8ascii ( buf ) ;                           // Convert possible UTF8
+  dline[pos].str = buf ;                        // Write o buffer
+  dsp_update_line ( pos ) ;                     // Show on display
+}
+#else
+#define displayinfo(a,b,c)                      // Empty declaration
 #endif
 
 
@@ -343,66 +831,6 @@ void emptyring()
     rbrindex = RINGBFSIZ - 1 ;
     rcount = 0 ;
   }
-}
-
-
-//******************************************************************************************
-//                              U T F 8 A S C I I                                          *
-//******************************************************************************************
-// UTF8-Decoder: convert UTF8-string to extended ASCII.                                    *
-// Convert a single Character from UTF8 to Extended ASCII.                                 *
-// Return "0" if a byte has to be ignored.                                                 *
-//******************************************************************************************
-byte utf8ascii ( byte ascii )
-{
-  static const byte lut_C3[] = 
-         { "AAAAAAACEEEEIIIIDNOOOOO#0UUUU###aaaaaaaceeeeiiiidnooooo##uuuuyyy" } ;
-  static byte       c1 ;              // Last character buffer
-  byte              res = 0 ;         // Result, default 0
-
-  if ( ascii <= 0x7F )                // Standard ASCII-set 0..0x7F handling
-  {
-    c1 = 0 ;
-    res = ascii ;                     // Return unmodified
-  }
-  else
-  {
-    switch ( c1 )                     // Conversion depending on first UTF8-character
-    {   
-      case 0xC2: res = '~' ;
-                 break ;
-      case 0xC3: res = lut_C3[ascii-128] ;
-                 break ;
-      case 0x82: if ( ascii == 0xAC )
-                 {
-                    res = 'E' ;       // Special case Euro-symbol
-                 }
-    }
-    c1 = ascii ;                      // Remember actual character
-  }
-  return res ;                        // Otherwise: return zero, if character has to be ignored
-}
-
-
-//******************************************************************************************
-//                              U T F 8 A S C I I                                          *
-//******************************************************************************************
-// In Place conversion UTF8-string to Extended ASCII (ASCII is shorter!).                  *
-//******************************************************************************************
-void utf8ascii ( char* s )
-{
-  int  i, k = 0 ;                     // Indexes for in en out string
-  char c ;
-
-  for ( i = 0 ; s[i] ; i++ )          // For every input character
-  {
-    c = utf8ascii ( s[i] ) ;          // Translate if necessary
-    if ( c )                          // Good translation?
-    {
-      s[k++] = c ;                    // Yes, put in output string
-    }
-  }
-  s[k] = 0 ;                          // Take care of delimeter
 }
 
 
@@ -660,11 +1088,18 @@ void testfile ( String fspec )
 //******************************************************************************************
 void timer100()
 {
-  static int     count10sec = 0 ;                 // Counter for activatie 10 seconds process
+  static int     count10sec = 0 ;                 // Counter for activate 10 seconds process
+  static int     count1sec = 0 ;                  // Counter for 1 second
   uint16_t       v ;                              // Analog input value 0..1023
   static uint8_t aoldval = 0 ;                    // Previous value of analog input switch
   uint8_t        anewval ;                        // New value of analog input switch (0..3)
   uint8_t        oldvol ;
+
+  if ( ++count1sec == 10  )                       // 1 second passed?
+  {
+    scrollflag = true ;                           // Yes, request scroll of LCD
+    count1sec = 0 ;                               // Reset count
+  }
 
   if ( ++count10sec == 100  )                     // 10 seconds passed?
   {
@@ -704,14 +1139,15 @@ void timer100()
     if (decodedIRCommand.value == IRCODEVOLDOWN) {
       oldvol = vs1053player.getVolume();
       ini_block.reqvol = oldvol - 2;
+      dbgprint ("Volume now is %d", ini_block.reqvol);
     }
     if (decodedIRCommand.value == IRCODEVOLUP) {
       oldvol = vs1053player.getVolume();
       ini_block.reqvol = oldvol + 2;
+      dbgprint ("Volume now is %d", ini_block.reqvol);
     }
     if (ini_block.reqvol < 0) ini_block.reqvol = 0;
     if (ini_block.reqvol > 100) ini_block.reqvol = 100;
-    dbgprint ("Volume now is %d", ini_block.reqvol);
 
     if (decodedIRCommand.value == IRCODEPREV) {
       ini_block.newpreset = currentpreset - 1;
@@ -733,51 +1169,6 @@ void timer100()
   }
 #endif
 }
-
-
-//******************************************************************************************
-//                              D I S P L A Y V O L U M E                                  *
-//******************************************************************************************
-// Show the current volume as an indicator on the screen.                                  *
-//******************************************************************************************
-void displayvolume()
-{
-#if defined ( USELCD )
-  static uint8_t   oldvol = 0 ;                       // Previous volume
-  uint16_t         pos ;                              // Positon of volume indicator
-
-  if ( vs1053player.getVolume() != oldvol )
-  {
-    pos = map ( vs1053player.getVolume(), 
-                                  0, 100, 0, 20 ) ;  // Compute end position on LCD
-    for ( int i=0; i < pos; i++ )
-      {
-        lcd.setCursor ( i, 3 ) ;   
-        lcd.write ( 0xFF );
-      }
-  }
-#endif
-}
-
-
-//******************************************************************************************
-//                              D I S P L A Y I N F O                                      *
-//******************************************************************************************
-// Show a string on the LCD at a specified y-position in a specified color                 *
-//******************************************************************************************
-#if defined ( USELCD )
-void displayinfo ( const char *str, int pos, int clr )
-{
-  if ( clr == 1 ) { lcd.clear(); }              // Clear screen if needed
-  char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
-  strcpy ( buf, str ) ;                         // Make a local copy of the string
-  utf8ascii ( buf ) ;                           // Convert possible UTF8
-  lcd.setCursor ( 0, pos ) ;                    // Prepare to show the info
-  lcd.print ( buf ) ;                           // Show the string
-}
-#else
-#define displayinfo(a,b,c)                      // Empty declaration
-#endif
 
 
 //******************************************************************************************
@@ -1561,14 +1952,10 @@ void setup()
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
 #if defined ( USELCD )
-  lcd.begin ( LCD_COLS, LCD_ROWS ) ;
-  lcd.init();                                          // Init LCD interface
-  lcd.backlight();                                     // Turn on the backlight.
-  lcd.setCursor ( 0, 1 ) ;
-  lcd.print ( VERSION ) ;
+  dsp_begin();
+  displayinfo ( VERSION, 1, 0 ) ;
   delay(1000);
-  lcd.setCursor ( 0, 2 ) ;
-  lcd.print ( "Starting" ) ;
+  displayinfo ( "Starting", 2, 0 ) ;
 #endif
   delay(10);
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
@@ -1712,9 +2099,6 @@ void loop()
     vs1053player.stopSong() ;                          // Stop playing
     emptyring() ;                                      // Empty the ringbuffer
     datamode = STOPPED ;                               // Yes, state becomes STOPPED
-#if defined ( USELCD )
-    lcd.clear() ;                                      // Clear screen
-#endif
     delay ( 500 ) ;
   }
   if ( localfile )
@@ -1808,12 +2192,19 @@ void loop()
   {
     vs1053player.setVolume ( ini_block.reqvol ) ;       // Unmute
   }
-  displayvolume() ;                                     // Show volume on display
   if ( testfilename.length() )                          // File to test?
   {
     testfile ( testfilename ) ;                         // Yes, do the test
     testfilename = "" ;                                 // Clear test request
   }
+  #if defined ( USELCD )
+  displayvolume() ;                                     // Show volume on display
+  if ( scrollflag )                                     // Time to scroll?
+  {
+    scrollflag = false ;                                // Yes, reset flag
+    dsp_update() ;                                      // LCD scroll
+  }
+  #endif
   scanserial() ;                                        // Handle serial input
   ArduinoOTA.handle() ;                                 // Check for OTA
 }
