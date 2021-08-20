@@ -5,9 +5,9 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sat, 15 May 2021 09:10:00 GMT"
+#define VERSION "Thu, 19 Aug 2021 09:10:00 GMT"
 // Use SPIRAM as ringbuffer. false = do not use
-#define SPIRAM false
+#define SPIRAM true
 // Define USELCD if you are using LCD 20x4
 #define USELCD
 #include <ESP8266WiFi.h>
@@ -66,9 +66,6 @@ extern "C"
 #define FLAG_RS_DATA                        0b00000001       // Bit 0, RS=data (command if clear)
 #define FLAG_RS_COMMAND                     0b00000000       // Command
 //
-#define COMMAND_BACKLIGHT_ON                0x01
-#define COMMAND_BACKLIGHT_OFF               0x00
-//
 #define COMMAND_CLEAR_DISPLAY               0x01
 #define COMMAND_RETURN_HOME                 0x02
 #define COMMAND_ENTRY_MODE_SET              0x04
@@ -86,10 +83,10 @@ extern "C"
 #define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
 #define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
 //
-#define dsp_print(a)                                               // Print a string 
-#define dsp_setCursor(a,b)                                         // Position the cursor
-#define dsp_getwidth()      20                                     // Get width of screen
-#define dsp_getheight()     4                                      // Get height of screen
+#define dsp_print(a)                                         // Print a string 
+#define dsp_setCursor(a,b)                                   // Position the cursor
+#define dsp_getwidth()                      20               // Get width of screen
+#define dsp_getheight()                     4                // Get height of screen
 //
 // Delay (in bytes) before reading from SPIRAM
 #define SPIRAMDELAY 200000
@@ -362,16 +359,10 @@ void LCD2004::strobe ( uint8_t cmd )
 //***********************************************************************************************
 void LCD2004::scommand ( uint8_t cmd )
 {
-  Wire.beginTransmission(I2C_ADDRESS);
-	Wire.write((int)(cmd) | COMMAND_BACKLIGHT_ON);
-	Wire.endTransmission();
-  delayMicroseconds(1);		                        // enable pulse must be >450ns
-  Wire.beginTransmission(I2C_ADDRESS);
-	Wire.write((int)(cmd) | COMMAND_BACKLIGHT_OFF);
-	Wire.endTransmission();
-  delayMicroseconds(50);		                      // commands need > 37us to settle
+  Wire.beginTransmission ( I2C_ADDRESS ) ;
+  Wire.write ( cmd | FLAG_BACKLIGHT_ON ) ;
+  Wire.endTransmission() ;
 }
-
 
 //***********************************************************************************************
 //                                L C D 2 0 0 4 :: P R I N T                                    *
@@ -464,10 +455,6 @@ void LCD2004::reset()
   write_cmd ( COMMAND_ENTRY_MODE_SET |
               FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT ) ;
   shome() ;
-  for ( char a = 'a' ; a < 'q' ; a++ )
-  {
-    print ( a ) ;
-  }
 }
 
 
@@ -485,7 +472,7 @@ LCD2004::LCD2004 ( uint8_t sda, uint8_t scl )
   Wire.beginTransmission ( I2C_ADDRESS ) ;
   if ( Wire.endTransmission() != 0 )
   {
-    dbgprint ( "param_config error!" ) ;              //safety check, make sure the PCF8574 is connected
+    dbgprint ( "LCD2004 connection error!" ) ;        //safety check, make sure the PCF8574 is connected
   }
   reset() ;
 }
@@ -576,16 +563,6 @@ void dsp_update()
     return ;
   }
   cnt = 0 ;
-//  if ( enc_menu_mode != VOLUME )                        // Encoder menu mode?
-//  {
-//    dline[1].str = tftdata[3].str.substring(0,dsp_getwidth()) ;     // Yes, different lines
-//    dline[2].str = tftdata[3].str.substring(dsp_getwidth()) ;
-//  }
-//  else
-//  {
-//    dline[2].str = tftdata[1].str ;                     // Local copy
-//    dline[1].str = tftdata[2].str ;                     // Local copy
-//  }  
   dline[2].str.trim() ;                                 // Remove non printing
   dline[1].str.trim() ;                                 // Remove non printing
   if ( dline[2].str.length() > dsp_getwidth() )
@@ -624,7 +601,7 @@ void displayvolume()
     {
       if ( i <= pos )
       {
-        dline[3].str += "\xFF" ;                      // Add block character
+        dline[3].str += "#" ;                         // Add hash character
       }
       else
       {
@@ -1950,7 +1927,10 @@ void setup()
   dsp_begin();
   displayinfo ( VERSION, 1, 0 ) ;
   delay(1000);
+  displayinfo ( "      ESP-radio     ", 0, 0 ) ;
+  delay(10),
   displayinfo ( "Starting", 2, 0 ) ;
+
 #endif
   delay(10);
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
