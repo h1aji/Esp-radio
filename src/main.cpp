@@ -104,6 +104,7 @@ extern "C"
 #define NAME "Esp-radio"
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS 20
+//
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
 #define USEIRRECV
@@ -115,8 +116,17 @@ uint16_t IRRECV_PIN = 0;
 #define IRCODEVOLUP     0xFF906F
 #define IRCODEPREV      0xFF02FD
 #define IRCODENEXT      0xFFC23D
-#define IRCODEHOME      0xFF629D
 #define IRCODEMUTE      0xFFE21D
+#define IRCODPRESET00   0xFF6897
+#define IRCODPRESET01   0xFF30CF
+#define IRCODPRESET02   0xFF18E7
+#define IRCODPRESET03   0xFF7A85
+#define IRCODPRESET04   0xFF10EF
+#define IRCODPRESET05   0xFF38C7
+#define IRCODPRESET06   0xFF5AA5
+#define IRCODPRESET07   0xFF42BD
+#define IRCODPRESET08   0xFF4AB5
+#define IRCODPRESET09   0xFF52AD
 #include <IRremoteESP8266.h>
 #include <IRrecv.h>
 #include <IRutils.h>
@@ -127,7 +137,6 @@ decode_results decodedIRCommand;
 //******************************************************************************************
 // Forward declaration of various functions                                                *
 //******************************************************************************************
-//void   displayinfo ( const char *str, int pos, int clr ) ;
 void   showstreamtitle ( const char* ml, bool full = false ) ;
 void   handlebyte ( uint8_t b, bool force = false ) ;
 void   handlebyte_ch ( uint8_t b, bool force = false ) ;
@@ -1065,7 +1074,7 @@ void utf8ascii ( char* s )
 //******************************************************************************************
 // Show a string on the LCD at a specified y-position in a specified color                 *
 //******************************************************************************************
-void displayinfo ( const char *str, int pos, int clr )
+void displayinfo ( const char *str, int pos )
 {
   char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
 
@@ -1492,15 +1501,18 @@ void timer100()
   }
 // Check for and execute new IR remote control commands
 #if defined(USEIRRECV)
-  if (irrecv.decode(&decodedIRCommand)) {
+  if (irrecv.decode(&decodedIRCommand))
+  {
     dbgprint ("IR Command received");
     oldvol = vs1053player.getVolume();
-    if (decodedIRCommand.value == IRCODEVOLDOWN) {
+    if (decodedIRCommand.value == IRCODEVOLDOWN)
+    {
       oldvol = vs1053player.getVolume();
       ini_block.reqvol = oldvol - 2;
       dbgprint ("Volume now is %d", ini_block.reqvol);
     }
-    if (decodedIRCommand.value == IRCODEVOLUP) {
+    if (decodedIRCommand.value == IRCODEVOLUP)
+    {
       oldvol = vs1053player.getVolume();
       ini_block.reqvol = oldvol + 2;
       dbgprint ("Volume now is %d", ini_block.reqvol);
@@ -1508,21 +1520,70 @@ void timer100()
     if (ini_block.reqvol < 0) ini_block.reqvol = 0;
     if (ini_block.reqvol > 100) ini_block.reqvol = 100;
 
-    if (decodedIRCommand.value == IRCODEPREV) {
+    if (decodedIRCommand.value == IRCODEPREV)
+    {
       ini_block.newpreset = currentpreset - 1;
       dbgprint ("IR Command: previous station");
     }
-    if (decodedIRCommand.value == IRCODENEXT) {
+    if (decodedIRCommand.value == IRCODENEXT)
+    {
       ini_block.newpreset = currentpreset + 1;
       dbgprint ("IR Command: next radio station");
     }
-    if (decodedIRCommand.value == IRCODEHOME) {
-      ini_block.newpreset = 0;
-      dbgprint ("IR Command: home station");
-    }
-    if (decodedIRCommand.value == IRCODEMUTE) {
+    if (decodedIRCommand.value == IRCODEMUTE)
+    {
       muteflag = !muteflag;
       dbgprint ("IR Command: mute");
+    }
+    if (decodedIRCommand.value == IRCODPRESET00)
+    {
+      ini_block.newpreset = 0;
+      dbgprint ("IR Command: preset_00");
+    }
+    if (decodedIRCommand.value == IRCODPRESET01)
+    {
+      ini_block.newpreset = 1;
+      dbgprint ("IR Command: preset_01");
+    }
+    if (decodedIRCommand.value == IRCODPRESET02)
+    {
+      ini_block.newpreset = 2;
+      dbgprint ("IR Command: preset_02");
+    }
+    if (decodedIRCommand.value == IRCODPRESET03)
+    {
+      ini_block.newpreset = 3;
+      dbgprint ("IR Command: preset_03");
+    }
+    if (decodedIRCommand.value == IRCODPRESET04)
+    {
+      ini_block.newpreset = 4;
+      dbgprint ("IR Command: preset_04");
+    }
+    if (decodedIRCommand.value == IRCODPRESET05)
+    {
+      ini_block.newpreset = 5;
+      dbgprint ("IR Command: preset_05");
+    }
+    if (decodedIRCommand.value == IRCODPRESET06)
+    {
+      ini_block.newpreset = 6;
+      dbgprint ("IR Command: preset_06");
+    }
+    if (decodedIRCommand.value == IRCODPRESET07)
+    {
+      ini_block.newpreset = 7;
+      dbgprint ("IR Command: preset_07");
+    }
+    if (decodedIRCommand.value == IRCODPRESET08)
+    {
+      ini_block.newpreset = 8;
+      dbgprint ("IR Command: preset_08");
+    }
+    if (decodedIRCommand.value == IRCODPRESET09)
+    {
+      ini_block.newpreset = 9;
+      dbgprint ("IR Command: preset_09");
     }
     irrecv.resume();  // Get ready to receive next IR command
   }
@@ -1583,7 +1644,7 @@ void showstreamtitle ( const char *ml, bool full )
     }
     strcpy ( p1, p2 ) ;                         // Shift 2nd part of title 2 or 3 places
   }
-  displayinfo ( streamtitle, 1, 0 ) ;           // Name of Song & Detail
+  displayinfo ( streamtitle, 1 ) ;              // Name of Song & Detail
 }
 
 
@@ -1624,7 +1685,7 @@ bool connecttohost()
 
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
-  displayinfo ( "** Internet radio **", 1, 1 ) ;
+  displayinfo ( "** Internet radio **", 1 ) ;
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
   if ( host.endsWith ( ".m3u" ) )                   // Is it an m3u playlist?
@@ -1653,7 +1714,7 @@ bool connecttohost()
   }
   pfs = dbgprint ( "Connect to %s on port %d, extension %s",
                    hostwoext.c_str(), port, extension.c_str() ) ;
-  displayinfo ( pfs, 2, 1 ) ;                       // Preset No.
+  displayinfo ( pfs, 2 ) ;                          // Preset No.
   mp3client = new WiFiClient() ;
   if ( mp3client->connect ( hostwoext.c_str(), port ) )
   {
@@ -1683,7 +1744,7 @@ bool connecttofile()
 {
   String path ;                                           // Full file spec
   char*  p ;                                              // Pointer to filename
-  displayinfo ( "**** MP3 Player ****", 1, 1 ) ;
+  displayinfo ( "**** MP3 Player ****", 1 ) ;
   path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
   mp3file = LittleFS.open ( path, "r" ) ;                 // Open the file
   if ( !mp3file )
@@ -1693,7 +1754,7 @@ bool connecttofile()
   }
   p = (char*)path.c_str() + 1 ;                           // Point to filename
   showstreamtitle ( p, true ) ;                           // Show the filename as title
-  displayinfo ( "Playing from local file", 2, 1 ) ;       // Show Source at position 60
+  displayinfo ( "Playing from local file", 2 ) ;          // Show Source at position 60
   icyname = "" ;                                          // No icy name yet
   chunked = false ;                                       // File not chunked
   return true ;
@@ -1724,7 +1785,7 @@ bool connectwifi()
   }
   pfs = dbgprint ( "IP = %d.%d.%d.%d",
                    WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] ) ;
-  displayinfo( pfs, 1, 1 ) ;                         // Show IP address
+  displayinfo( pfs, 1 ) ;                            // Show IP address
   return true ;
 }
 
@@ -2312,11 +2373,11 @@ void setup()
   vs1053player.begin() ;                               // Initialize VS1053 player
 #if defined ( USELCD )
   dsp_begin();
-  displayinfo ( VERSION, 1, 0 ) ;
+  displayinfo ( VERSION, 1 ) ;
   delay(1000);
-  displayinfo ( "      ESP-radio     ", 0, 0 ) ;
+  displayinfo ( "      ESP-radio     ", 0 ) ;
   delay(10),
-  displayinfo ( "Starting", 2, 0 ) ;
+  displayinfo ( "Starting", 2 ) ;
 #endif
   delay(10);
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
@@ -2793,7 +2854,7 @@ void handlebyte ( uint8_t b, bool force )
           icyname = metaline.substring(9) ;            // Get station name
           icyname = decode_spec_chars ( icyname ) ;    // Decode special characters in name
           icyname.trim() ;                             // Remove leading and trailing spaces
-          displayinfo ( icyname.c_str(), 1, 1 ) ;      // Show station name
+          displayinfo ( icyname.c_str(), 1 ) ;         // Show station name
         }
         else if ( lcml.startsWith ( "transfer-encoding:" ) )
         {
