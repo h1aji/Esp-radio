@@ -18,6 +18,7 @@
 #include <ArduinoOTA.h>
 #include <TinyXML.h>
 #include <LittleFS.h>
+#include <time.h>
 //
 // Use SPIRAM as ringbuffer. false = do not use
 #define SPIRAM true
@@ -105,6 +106,11 @@ extern "C"
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS 20
 //
+// NTP settings
+#define TZ         12                                       // Default NZ time zone
+#define DST        1                                        // DST is +1 hour
+#define NTP_SERVER "pool.ntp.org"                           // Default server for NTP
+//
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
 #define USEIRRECV
@@ -133,10 +139,13 @@ uint16_t IRRECV_PIN = 0;
 IRrecv irrecv(IRRECV_PIN);
 decode_results decodedIRCommand;
 #endif
+
+
 //
 //******************************************************************************************
 // Forward declaration of various functions                                                *
 //******************************************************************************************
+void   displaytime ( const char* str ) ;
 void   showstreamtitle ( const char* ml, bool full = false ) ;
 void   handlebyte ( uint8_t b, bool force = false ) ;
 void   handlebyte_ch ( uint8_t b, bool force = false ) ;
@@ -152,6 +161,7 @@ String chomp ( String str ) ;
 void   publishIP() ;
 String xmlparse ( String mount ) ;
 bool   connecttohost() ;
+void   gettime() ;
 
 
 //
@@ -234,6 +244,8 @@ uint8_t          prcwinx ;                                 // Index in pwchunk (
 uint8_t          prcrinx ;                                 // Index in prchunk (see getring)
 int32_t          spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
 bool             scrollflag = false ;                      // Request to scroll LCD
+struct tm        timeinfo ;                                // Will be filled by NTP server
+char             timetxt[9] ;                              // Converted timeinfo
 
 // XML parse globals.
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -989,7 +1001,7 @@ void displayvolume()
 
   dline[3].str = "";
 
-  newvol = vs1053player.getVolume() ;                // Get current volume setting
+  newvol = vs1053player.getVolume() ;                 // Get current volume setting
   if ( newvol != oldvol )                             // Volume changed?
   {
     oldvol = newvol ;                                 // Remember for next compare
@@ -1009,6 +1021,38 @@ void displayvolume()
   }
 }
 
+
+//**************************************************************************************************
+//                                      D I S P L A Y T I M E                                      *
+//**************************************************************************************************
+// Display date and time to LCD line 0.                                                            *
+//**************************************************************************************************
+void displaytime ( const char* str )
+{
+  const char* WDAYS [] = { "???", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" } ;
+  char        datetxt[24] ;
+  static char oldstr = '\0' ;                            // To check time difference
+
+  if ( ( str == NULL ) || ( str[0] == '\0' ) )           // Check time string
+  {
+    return ;                                             // Not okay, return
+  }
+  else
+  {
+    if ( str[7] == oldstr )                              // Difference?
+    {
+      return ;                                           // No, quick return
+    }
+    sprintf ( datetxt, "%s %02d.%02d.  %s",              // Format new time to a string
+                       WDAYS[timeinfo.tm_wday],
+                       timeinfo.tm_mday,
+                       timeinfo.tm_mon + 1,
+                       str ) ;
+  }
+  dline[0].str = String ( datetxt ) ;                    // Copy datestring or empty string to LCD line 0   
+  oldstr = str[7] ;                                      // For next compare, last digit of time
+  dsp_update_line ( 0 ) ;
+}
 
 //******************************************************************************************
 //                              U T F 8 A S C I I                                          *
@@ -1087,6 +1131,54 @@ void displayinfo ( const char *str, int pos )
 #else
 #define displayinfo(a,b,c)                      // Empty declaration
 #endif
+
+
+//**************************************************************************************************
+//                                         G E T T I M E                                           *
+//**************************************************************************************************
+// Retrieve the local time from NTP server and convert to string.                                  *
+// Will be called every second.                                                                    *
+//**************************************************************************************************
+void gettime()
+{
+  static int16_t delaycount = 0 ;                         // To reduce number of NTP requests
+  static int16_t retrycount = 100 ;
+
+  if ( timeinfo.tm_year )                                 // Legal time found?
+  {
+    sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
+              timeinfo.tm_hour,
+              timeinfo.tm_min,
+              timeinfo.tm_sec ) ;
+  }
+  if ( --delaycount <= 0 )                                // Sync every few hours
+  {
+    delaycount = 7200 ;                                   // Reset counter
+    if ( timeinfo.tm_year )                               // Legal time found?
+    {
+      dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
+    }
+    dbgprint ( "Sync TOD" ) ;
+    if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
+    {
+      dbgprint ( "Failed to obtain time!" ) ;             // Error
+      timeinfo.tm_year = 0 ;                              // Set current time to illegal
+      if ( retrycount )                                   // Give up syncing?
+      {
+        retrycount-- ;                                    // No try again
+        delaycount = 5 ;                                  // Retry after 5 seconds
+      }
+    }
+    else
+    {
+      sprintf ( timetxt, "%02d:%02d:%02d",                // Format new time to a string
+                timeinfo.tm_hour,
+                timeinfo.tm_min,
+                timeinfo.tm_sec ) ;
+      dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
+    }
+  }
+}
 
 
 //******************************************************************************************
@@ -1687,6 +1779,8 @@ bool connecttohost()
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
   displayinfo ( "** Internet radio **", 1 ) ;
+  displaytime ( "" ) ;                              // Clear time on LCD screen
+
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
   if ( host.endsWith ( ".m3u" ) )                   // Is it an m3u playlist?
@@ -2425,7 +2519,13 @@ void setup()
     currentpreset = ini_block.newpreset ;              // No network: do not start radio
   }
   delay ( 1000 ) ;                                     // Show IP for a while
+  configTime ( TZ * 3600, DST * 3600, NTP_SERVER ) ;   // GMT offset, daylight offset in seconds
+  timeinfo.tm_year = 0 ;                               // Set TOD to illegal
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
+  if ( NetworkFound )
+  {
+    gettime() ;                                        // Sync time
+  }
   if ( usespiram )
   {
     dbgprint ( "Testing SPIRAM getring/putring" ) ;
@@ -2622,6 +2722,7 @@ void loop()
   }
   #if defined ( USELCD )
   displayvolume() ;                                     // Show volume on display
+  displaytime ( timetxt ) ;                             // Write to LCD screen
   if ( scrollflag )                                     // Time to scroll?
   {
     scrollflag = false ;                                // Yes, reset flag
