@@ -652,6 +652,7 @@ void VS1053::AdjustRate ( long ppm2 )
 // The object for the MP3 player
 VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 
+
 #if defined ( USELCD )
 //***************************************************************************************************
 //*  LCD2004.h -- Driver for LCD 2004 display with I2C backpack.                                    *
@@ -1644,7 +1645,7 @@ void showstreamtitle ( const char *ml, bool full )
     }
     strcpy ( p1, p2 ) ;                         // Shift 2nd part of title 2 or 3 places
   }
-  displayinfo ( streamtitle, 1 ) ;              // Name of Song & Detail
+  displayinfo ( streamtitle, 2 ) ;              // Name of Song & Detail
 }
 
 
