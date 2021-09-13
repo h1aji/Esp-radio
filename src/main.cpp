@@ -246,6 +246,7 @@ int32_t          spiramdelay = SPIRAMDELAY ;               // Delay before readi
 bool             scrollflag = false ;                      // Request to scroll LCD
 struct tm        timeinfo ;                                // Will be filled by NTP server
 char             timetxt[9] ;                              // Converted timeinfo
+bool             time_req = false ;                        // Set time requested
 
 // XML parse globals.
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -1139,6 +1140,22 @@ void displayinfo ( const char *str, int pos )
 // Retrieve the local time from NTP server and convert to string.                                  *
 // Will be called every second.                                                                    *
 //**************************************************************************************************
+bool getLocalTime(struct tm * info, uint32_t ms)
+{
+    uint32_t start = millis();
+    time_t now;
+    while((millis()-start) <= ms) {
+        time(&now);
+        localtime_r(&now, info);
+        if(info->tm_year > (2016 - 1900))
+        {
+            return true;
+        }
+        delay(10);
+    }
+    return false;
+}
+
 void gettime()
 {
   static int16_t delaycount = 0 ;                         // To reduce number of NTP requests
@@ -1159,7 +1176,7 @@ void gettime()
       dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
     }
     dbgprint ( "Sync TOD" ) ;
-    if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
+    if ( !getLocalTime ( &timeinfo, 5000 ) )              // Read from NTP server
     {
       dbgprint ( "Failed to obtain time!" ) ;             // Error
       timeinfo.tm_year = 0 ;                              // Set current time to illegal
@@ -1560,6 +1577,19 @@ void timer100()
   {
     scrollflag = true ;                           // Yes, request scroll of LCD
     count1sec = 0 ;                               // Reset count
+    if ( ++timeinfo.tm_sec >= 60 )                // Yes, update number of seconds
+    {
+      timeinfo.tm_sec = 0 ;                       // Wrap after 60 seconds
+      if ( ++timeinfo.tm_min >= 60 )
+      {
+        timeinfo.tm_min = 0 ;                     // Wrap after 60 minutes
+        if ( ++timeinfo.tm_hour >= 24 )
+        {
+          timeinfo.tm_hour = 0 ;                  // Wrap after 24 hours
+        }
+      }
+    }
+    time_req = true ;                             // Yes, show current time request
   }
 
   if ( ++count10sec == 100  )                     // 10 seconds passed?
@@ -2720,9 +2750,20 @@ void loop()
     testfile ( testfilename ) ;                         // Yes, do the test
     testfilename = "" ;                                 // Clear test request
   }
+  if ( time_req && NetworkFound )                       // Time to refresh time?
+  {
+    gettime() ;                                         // Yes, get the current time
+  }
   #if defined ( USELCD )
-  displayvolume() ;                                     // Show volume on display
-  displaytime ( timetxt ) ;                             // Write to LCD screen
+  if ( time_req )                                       // Time to refresh timetxt?
+  {
+    time_req = false ;                                  // Yes, clear request
+    if ( NetworkFound  )                                // Time available?
+    {
+      displaytime ( timetxt ) ;                         // Write to TFT screen
+      displayvolume() ;                                 // Show volume on display
+    }
+  }
   if ( scrollflag )                                     // Time to scroll?
   {
     scrollflag = false ;                                // Yes, reset flag
