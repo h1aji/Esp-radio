@@ -48,3 +48,4 @@
 - 23-04-2018, ES: Check BASS setting.
 - 17-07-2021, ES: SPI RAM LC1024 support added.
 - 19-08-2021, ES: LCD 2004 support added.
+- 10-09-2021, ES: NTP support added.

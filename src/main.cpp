@@ -5,7 +5,7 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Thu, 19 Aug 2021 09:10:00 GMT"
+#define VERSION "Tue, 14 Sep 2021"
 //
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
@@ -1906,11 +1906,12 @@ bool connectwifi()
     WiFi.softAP ( NAME, NAME ) ;                       // This ESP will be an AP
     delay ( 5000 ) ;
     pfs = dbgprint ( "IP = 192.168.4.1" ) ;            // Address if AP
+    displayinfo ( " AP mode activated ", 2 ) ;
     return false ;
   }
   pfs = dbgprint ( "IP = %d.%d.%d.%d",
                    WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] ) ;
-  displayinfo( pfs, 1 ) ;                            // Show IP address
+  displayinfo ( pfs, 1 ) ;                             // Show IP address
   return true ;
 }
 
@@ -2498,11 +2499,11 @@ void setup()
   vs1053player.begin() ;                               // Initialize VS1053 player
 #if defined ( USELCD )
   dsp_begin();
-  displayinfo ( VERSION, 1 ) ;
-  delay(1000);
+  displayinfo ( VERSION, 0 ) ;
+  delay(3000);
   displayinfo ( "      ESP-radio     ", 0 ) ;
   delay(10),
-  displayinfo ( "Starting", 2 ) ;
+  displayinfo ( "      Starting      ", 2 ) ;
 #endif
   delay(10);
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
