@@ -5,27 +5,31 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sat, 15 May 2021 09:10:00 GMT"
-#define SPIRAM  true                          // Use SPIRAM as ringbuffer. false = do not use
-// Define USELCD if you are using LCD 20x4.
-//#define USELCD
+#define VERSION "Tue, 14 Sep 2021"
+//
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncMqttClient.h>
 #include <SPI.h>
-#include <VS1053.h>
-#if defined ( USELCD )
-  #include <LiquidCrystal_I2C.h>
-#endif
 #include <Ticker.h>
 #include <stdio.h>
 #include <string.h>
 #include <ArduinoOTA.h>
 #include <TinyXML.h>
 #include <LittleFS.h>
+#include <time.h>
+//
+// Use SPIRAM as ringbuffer. false = do not use
+#define SPIRAM true
 #ifdef SPIRAM
-  #include <ESP8266Spiram.h>                  // https://github.com/Gianbacchio/ESP8266_Spiram
+  #include <spiram.h>
+#endif
+//
+// Define USELCD if you are using LCD 20x4
+#define USELCD
+#if defined ( USELCD )
+  #include <Wire.h>
 #endif
 
 extern "C"
@@ -51,13 +55,44 @@ extern "C"
 #define VS1053_CS     15
 #define VS1053_DCS    16
 #define VS1053_DREQ   2
-// Pins SCL and SDA for LCD module (if used, see definition of "USELCD")
-//#define SCL           5
-//#define SDA           4
-// I2C address, length and heigth for LCD module (if used, see definition of "USELCD")
-#define LCD_ADDR      0x27
-#define LCD_HEIGHT    4
-#define LCD_LENGTH    20
+// Pins for LCD 2004
+#define SDA_PIN 4
+#define SCL_PIN 5
+// Adjust for your display
+#define I2C_ADDRESS 0x27
+// Enable ACK for I2C communication
+#define ACKENA      true
+//
+#define DELAY_ENABLE_PULSE_SETTLE           50               // Command requires > 37us to settle
+#define FLAG_BACKLIGHT_ON                   0b00001000       // Bit 3, backlight enabled (disabled if clear)
+#define FLAG_ENABLE                         0b00000100       // Bit 2, Enable
+#define FLAG_RS_DATA                        0b00000001       // Bit 0, RS=data (command if clear)
+#define FLAG_RS_COMMAND                     0b00000000       // Command
+//
+#define COMMAND_CLEAR_DISPLAY               0x01
+#define COMMAND_RETURN_HOME                 0x02
+#define COMMAND_ENTRY_MODE_SET              0x04
+#define COMMAND_DISPLAY_CONTROL             0x08
+#define COMMAND_FUNCTION_SET                0x20
+#define COMMAND_SET_DDRAM_ADDR              0x80
+//
+#define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
+#define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
+//
+#define FLAG_FUNCTION_SET_MODE_4BIT         0x00
+#define FLAG_FUNCTION_SET_LINES_2           0x08
+#define FLAG_FUNCTION_SET_DOTS_5X8          0x00
+//
+#define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
+#define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
+//
+#define dsp_print(a)                                         // Print a string 
+#define dsp_setCursor(a,b)                                   // Position the cursor
+#define dsp_getwidth()                      20               // Get width of screen
+#define dsp_getheight()                     4                // Get height of screen
+//
+// Delay (in bytes) before reading from SPIRAM
+#define SPIRAMDELAY 200000
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
 #define RINGBFSIZ 20000
 // Debug buffer size
@@ -70,30 +105,47 @@ extern "C"
 #define NAME "Esp-radio"
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS 20
+//
+// NTP settings
+#define TZ         12                                       // Default NZ time zone
+#define DST        1                                        // DST is +1 hour
+#define NTP_SERVER "pool.ntp.org"                           // Default server for NTP
+//
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
-//#define USEIRRECV
+#define USEIRRECV
 #if defined ( USEIRRECV )
  // IR receiver pin, 0 for GPIO0
 uint16_t IRRECV_PIN = 0;
 // IRremote button definitions. Read out using Examples->IRremoteESP8266->IRrecvDemo.ino
-#define IRCODEVOLDOWN   0x77E13040
-#define IRCODEVOLUP     0x77E15040
-#define IRCODEPREV      0x77E19040
-#define IRCODENEXT      0x77E16040
-#define IRCODEHOME      0x77E1C040
-#define IRCODEMUTE      0x77E1A040
+#define IRCODEVOLDOWN   0xFFA857
+#define IRCODEVOLUP     0xFF906F
+#define IRCODEPREV      0xFF02FD
+#define IRCODENEXT      0xFFC23D
+#define IRCODEMUTE      0xFFE21D
+#define IRCODPRESET00   0xFF6897
+#define IRCODPRESET01   0xFF30CF
+#define IRCODPRESET02   0xFF18E7
+#define IRCODPRESET03   0xFF7A85
+#define IRCODPRESET04   0xFF10EF
+#define IRCODPRESET05   0xFF38C7
+#define IRCODPRESET06   0xFF5AA5
+#define IRCODPRESET07   0xFF42BD
+#define IRCODPRESET08   0xFF4AB5
+#define IRCODPRESET09   0xFF52AD
 #include <IRremoteESP8266.h>
 #include <IRrecv.h>
 #include <IRutils.h>
 IRrecv irrecv(IRRECV_PIN);
 decode_results decodedIRCommand;
 #endif
+
+
 //
 //******************************************************************************************
 // Forward declaration of various functions                                                *
 //******************************************************************************************
-//void   displayinfo ( const char *str, int pos, int clr ) ;
+void   displaytime ( const char* str ) ;
 void   showstreamtitle ( const char* ml, bool full = false ) ;
 void   handlebyte ( uint8_t b, bool force = false ) ;
 void   handlebyte_ch ( uint8_t b, bool force = false ) ;
@@ -109,6 +161,7 @@ String chomp ( String str ) ;
 void   publishIP() ;
 String xmlparse ( String mount ) ;
 bool   connecttohost() ;
+void   gettime() ;
 
 
 //
@@ -189,6 +242,11 @@ int              chunkcount = 0 ;                          // Counter for chunke
 bool             usespiram = SPIRAM ;                      // For check using SPIRAM at runtime
 uint8_t          prcwinx ;                                 // Index in pwchunk (see putring)
 uint8_t          prcrinx ;                                 // Index in prchunk (see getring)
+int32_t          spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
+bool             scrollflag = false ;                      // Request to scroll LCD
+struct tm        timeinfo ;                                // Will be filled by NTP server
+char             timetxt[9] ;                              // Converted timeinfo
+bool             time_req = false ;                        // Set time requested
 
 // XML parse globals.
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -218,116 +276,925 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 #include <radio_css.h>
 #include <favicon_ico.h>
 
+//
+//******************************************************************************************
+// VS1053 stuff.  Based on maniacbug library.                                              *
+//******************************************************************************************
+// VS1053 class definition.                                                                *
+//******************************************************************************************
+class VS1053
+{
+  private:
+    uint8_t       cs_pin ;                        // Pin where CS line is connected
+    uint8_t       dcs_pin ;                       // Pin where DCS line is connected
+    uint8_t       dreq_pin ;                      // Pin where DREQ line is connected
+    uint8_t       curvol ;                        // Current volume setting 0..100%
+    const uint8_t vs1053_chunk_size = 32 ;
+    // SCI Register
+    const uint8_t SCI_MODE          = 0x0 ;
+    const uint8_t SCI_BASS          = 0x2 ;
+    const uint8_t SCI_CLOCKF        = 0x3 ;
+    const uint8_t SCI_AUDATA        = 0x5 ;
+    const uint8_t SCI_WRAM          = 0x6 ;
+    const uint8_t SCI_WRAMADDR      = 0x7 ;
+    const uint8_t SCI_AIADDR        = 0xA ;
+    const uint8_t SCI_VOL           = 0xB ;
+    const uint8_t SCI_AICTRL0       = 0xC ;
+    const uint8_t SCI_AICTRL1       = 0xD ;
+    const uint8_t SCI_num_registers = 0xF ;
+    // SCI_MODE bits
+    const uint8_t SM_SDINEW         = 11 ;        // Bitnumber in SCI_MODE always on
+    const uint8_t SM_RESET          = 2 ;         // Bitnumber in SCI_MODE soft reset
+    const uint8_t SM_CANCEL         = 3 ;         // Bitnumber in SCI_MODE cancel song
+    const uint8_t SM_TESTS          = 5 ;         // Bitnumber in SCI_MODE for tests
+    const uint8_t SM_LINE1          = 14 ;        // Bitnumber in SCI_MODE for Line input
+    SPISettings   VS1053_SPI ;                    // SPI settings for this slave
+    uint8_t       endFillByte ;                   // Byte to send when stopping song
+  protected:
+    inline void await_data_request() const
+    {
+      while ( !digitalRead ( dreq_pin ) )
+      {
+        yield() ;                                 // Very short delay
+      }
+    }
+
+    inline void control_mode_on() const
+    {
+      SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
+      digitalWrite ( dcs_pin, HIGH ) ;            // Bring slave in control mode
+      digitalWrite ( cs_pin, LOW ) ;
+    }
+
+    inline void control_mode_off() const
+    {
+      digitalWrite ( cs_pin, HIGH ) ;             // End control mode
+      SPI.endTransaction() ;                      // Allow other SPI users
+    }
+
+    inline void data_mode_on() const
+    {
+      SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
+      digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
+      digitalWrite ( dcs_pin, LOW ) ;
+    }
+
+    inline void data_mode_off() const
+    {
+      digitalWrite ( dcs_pin, HIGH ) ;            // End data mode
+      SPI.endTransaction() ;                      // Allow other SPI users
+    }
+
+    uint16_t read_register ( uint8_t _reg ) const ;
+    void     write_register ( uint8_t _reg, uint16_t _value ) const ;
+    void     sdi_send_buffer ( uint8_t* data, size_t len ) ;
+    void     sdi_send_fillers ( size_t length ) ;
+    void     wram_write ( uint16_t address, uint16_t data ) ;
+    uint16_t wram_read ( uint16_t address ) ;
+
+  public:
+    // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
+    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) ;
+    void     begin() ;                                   // Begin operation.  Sets pins correctly,
+    // and prepares SPI bus.
+    void     startSong() ;                               // Prepare to start playing. Call this each
+    // time a new song starts.
+    void     playChunk ( uint8_t* data, size_t len ) ;   // Play a chunk of data.  Copies the data to
+    // the chip.  Blocks until complete.
+    void     stopSong() ;                                // Finish playing a song. Call this after
+    // the last playChunk call.
+    void     setVolume ( uint8_t vol ) ;                 // Set the player volume.Level from 0-100,
+    // higher is louder.
+    void     setTone ( uint8_t* rtone ) ;                // Set the player baas/treble, 4 nibbles for
+    // treble gain/freq and bass gain/freq
+    uint8_t  getVolume() ;                               // Get the currenet volume setting.
+    // higher is louder.
+    void     printDetails ( const char *header ) ;       // Print configuration details to serial output.
+    void     softReset() ;                               // Do a soft reset
+    bool     testComm ( const char *header ) ;           // Test communication with module
+    inline bool data_request() const
+    {
+      return ( digitalRead ( dreq_pin ) == HIGH ) ;
+    }
+    void     AdjustRate ( long ppm2 ) ;                  // Fine tune the datarate
+} ;
+
+//******************************************************************************************
+// VS1053 class implementation.                                                            *
+//******************************************************************************************
+
+VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) :
+  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin)
+{
+}
+
+uint16_t VS1053::read_register ( uint8_t _reg ) const
+{
+  uint16_t result ;
+
+  control_mode_on() ;
+  SPI.write ( 3 ) ;                                // Read operation
+  SPI.write ( _reg ) ;                             // Register to write (0..0xF)
+  // Note: transfer16 does not seem to work
+  result = ( SPI.transfer ( 0xFF ) << 8 ) |        // Read 16 bits data
+           ( SPI.transfer ( 0xFF ) ) ;
+  await_data_request() ;                           // Wait for DREQ to be HIGH again
+  control_mode_off() ;
+  return result ;
+}
+
+void VS1053::write_register ( uint8_t _reg, uint16_t _value ) const
+{
+  control_mode_on( );
+  SPI.write ( 2 ) ;                                // Write operation
+  SPI.write ( _reg ) ;                             // Register to write (0..0xF)
+  SPI.write16 ( _value ) ;                         // Send 16 bits data
+  await_data_request() ;
+  control_mode_off() ;
+}
+
+void VS1053::sdi_send_buffer ( uint8_t* data, size_t len )
+{
+  size_t chunk_length ;                            // Length of chunk 32 byte or shorter
+
+  data_mode_on() ;
+  while ( len )                                    // More to do?
+  {
+    await_data_request() ;                         // Wait for space available
+    chunk_length = len ;
+    if ( len > vs1053_chunk_size )
+    {
+      chunk_length = vs1053_chunk_size ;
+    }
+    len -= chunk_length ;
+    SPI.writeBytes ( data, chunk_length ) ;
+    data += chunk_length ;
+  }
+  data_mode_off() ;
+}
+
+void VS1053::sdi_send_fillers ( size_t len )
+{
+  size_t chunk_length ;                            // Length of chunk 32 byte or shorter
+
+  data_mode_on() ;
+  while ( len )                                    // More to do?
+  {
+    await_data_request() ;                         // Wait for space available
+    chunk_length = len ;
+    if ( len > vs1053_chunk_size )
+    {
+      chunk_length = vs1053_chunk_size ;
+    }
+    len -= chunk_length ;
+    while ( chunk_length-- )
+    {
+      SPI.write ( endFillByte ) ;
+    }
+  }
+  data_mode_off();
+}
+
+void VS1053::wram_write ( uint16_t address, uint16_t data )
+{
+  write_register ( SCI_WRAMADDR, address ) ;
+  write_register ( SCI_WRAM, data ) ;
+}
+
+uint16_t VS1053::wram_read ( uint16_t address )
+{
+  write_register ( SCI_WRAMADDR, address ) ;            // Start reading from WRAM
+  return read_register ( SCI_WRAM ) ;                   // Read back result
+}
+
+bool VS1053::testComm ( const char *header )
+{
+  // Test the communication with the VS1053 module.  The result wille be returned.
+  // If DREQ is low, there is problably no VS1053 connected.  Pull the line HIGH
+  // in order to prevent an endless loop waiting for this signal.  The rest of the
+  // software will still work, but readbacks from VS1053 will fail.
+  int       i ;                                         // Loop control
+  uint16_t  r1, r2, cnt = 0 ;
+  uint16_t  delta = 300 ;                               // 3 for fast SPI
+
+  if ( !digitalRead ( dreq_pin ) )
+  {
+    dbgprint ( "VS1053 not properly installed!" ) ;
+    // Allow testing without the VS1053 module
+    pinMode ( dreq_pin,  INPUT_PULLUP ) ;               // DREQ is now input with pull-up
+    return false ;                                      // Return bad result
+  }
+  // Further TESTING.  Check if SCI bus can write and read without errors.
+  // We will use the volume setting for this.
+  // Will give warnings on serial output if DEBUG is active.
+  // A maximum of 20 errors will be reported.
+  if ( strstr ( header, "Fast" ) )
+  {
+    delta = 3 ;                                         // Fast SPI, more loops
+  }
+  dbgprint ( header ) ;                                 // Show a header
+  for ( i = 0 ; ( i < 0xFFFF ) && ( cnt < 20 ) ; i += delta )
+  {
+    write_register ( SCI_VOL, i ) ;                     // Write data to SCI_VOL
+    r1 = read_register ( SCI_VOL ) ;                    // Read back for the first time
+    r2 = read_register ( SCI_VOL ) ;                    // Read back a second time
+    if  ( r1 != r2 || i != r1 || i != r2 )              // Check for 2 equal reads
+    {
+      dbgprint ( "VS1053 error retry SB:%04X R1:%04X R2:%04X", i, r1, r2 ) ;
+      cnt++ ;
+      delay ( 10 ) ;
+    }
+    yield() ;                                           // Allow ESP firmware to do some bookkeeping
+  }
+  return ( cnt == 0 ) ;                                 // Return the result
+}
+
+void VS1053::begin()
+{
+  pinMode      ( dreq_pin,  INPUT ) ;                   // DREQ is an input
+  pinMode      ( cs_pin,    OUTPUT ) ;                  // The SCI and SDI signals
+  pinMode      ( dcs_pin,   OUTPUT ) ;
+  digitalWrite ( dcs_pin,   HIGH ) ;                    // Start HIGH for SCI en SDI
+  digitalWrite ( cs_pin,    HIGH ) ;
+  delay ( 100 ) ;
+  dbgprint ( "Reset VS1053..." ) ;
+  digitalWrite ( dcs_pin,   LOW ) ;                     // Low & Low will bring reset pin low
+  digitalWrite ( cs_pin,    LOW ) ;
+  delay ( 2000 ) ;
+  dbgprint ( "End reset VS1053..." ) ;
+  digitalWrite ( dcs_pin,   HIGH ) ;                    // Back to normal again
+  digitalWrite ( cs_pin,    HIGH ) ;
+  delay ( 500 ) ;
+  // Init SPI in slow mode ( 0.2 MHz )
+  VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
+  //printDetails ( "Right after reset/startup" ) ;
+  delay ( 20 ) ;
+  //printDetails ( "20 msec after reset" ) ;
+  testComm ( "Slow SPI,Testing VS1053 read/write registers..." ) ;
+  // Most VS1053 modules will start up in midi mode.  The result is that there is no audio
+  // when playing MP3.  You can modify the board, but there is a more elegant way:
+  wram_write ( 0xC017, 3 ) ;                            // GPIO DDR = 3
+  wram_write ( 0xC019, 0 ) ;                            // GPIO ODATA = 0
+  delay ( 100 ) ;
+  //printDetails ( "After test loop" ) ;
+  softReset() ;                                         // Do a soft reset
+  // Switch on the analog parts
+  write_register ( SCI_AUDATA, 44100 + 1 ) ;            // 44.1kHz + stereo
+  // The next clocksetting allows SPI clocking at 5 MHz, 4 MHz is safe then.
+  write_register ( SCI_CLOCKF, 6 << 12 ) ;              // Normal clock settings multiplyer 3.0 = 12.2 MHz
+  //SPI Clock to 4 MHz. Now you can set high speed SPI clock.
+  VS1053_SPI = SPISettings ( 4000000, MSBFIRST, SPI_MODE0 ) ;
+  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_LINE1 ) ) ;
+  testComm ( "Fast SPI, Testing VS1053 read/write registers again..." ) ;
+  delay ( 10 ) ;
+  await_data_request() ;
+  endFillByte = wram_read ( 0x1E06 ) & 0xFF ;
+  dbgprint ( "endFillByte is %X", endFillByte ) ;
+  //printDetails ( "After last clocksetting" ) ;
+  delay ( 100 ) ;
+}
+
+void VS1053::setVolume ( uint8_t vol )
+{
+  // Set volume.  Both left and right.
+  // Input value is 0..100.  100 is the loudest.
+  // Clicking reduced by using 0xf8 to 0x00 as limits.
+  uint16_t value ;                                      // Value to send to SCI_VOL
+
+  if ( vol != curvol )
+  {
+    curvol = vol ;                                      // Save for later use
+    value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
+    value = ( value << 8 ) | value ;
+    write_register ( SCI_VOL, value ) ;                 // Volume left and right
+  }
+}
+
+void VS1053::setTone ( uint8_t *rtone )                 // Set bass/treble (4 nibbles)
+{
+  // Set tone characteristics.  See documentation for the 4 nibbles.
+  uint16_t value = 0 ;                                  // Value to send to SCI_BASS
+  int      i ;                                          // Loop control
+
+  for ( i = 0 ; i < 4 ; i++ )
+  {
+    value = ( value << 4 ) | rtone[i] ;                 // Shift next nibble in
+  }
+  write_register ( SCI_BASS, value ) ;                  // Tone settings
+  value = read_register ( SCI_BASS ) ;                  // Read back
+  dbgprint ( "BASS settings is %04X", value ) ;         // Print for TEST
+}
+
+uint8_t VS1053::getVolume()                             // Get the currenet volume setting.
+{
+  return curvol ;
+}
+
+void VS1053::startSong()
+{
+  sdi_send_fillers ( 10 ) ;
+}
+
+void VS1053::playChunk ( uint8_t* data, size_t len )
+{
+  sdi_send_buffer ( data, len ) ;
+}
+
+void VS1053::stopSong()
+{
+  uint16_t modereg ;                     // Read from mode register
+  int      i ;                           // Loop control
+
+  sdi_send_fillers ( 2052 ) ;
+  delay ( 10 ) ;
+  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
+  for ( i = 0 ; i < 200 ; i++ )
+  {
+    sdi_send_fillers ( 32 ) ;
+    modereg = read_register ( SCI_MODE ) ;  // Read status
+    if ( ( modereg & _BV ( SM_CANCEL ) ) == 0 )
+    {
+      sdi_send_fillers ( 2052 ) ;
+      dbgprint ( "Song stopped correctly after %d msec", i * 10 ) ;
+      return ;
+    }
+    delay ( 10 ) ;
+  }
+  printDetails ( "Song stopped incorrectly!" ) ;
+}
+
+void VS1053::softReset()
+{
+  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_RESET ) ) ;
+  delay ( 10 ) ;
+  await_data_request() ;
+}
+
+void VS1053::printDetails ( const char *header )
+{
+  uint16_t     regbuf[16] ;
+  uint8_t      i ;
+
+  dbgprint ( header ) ;
+  dbgprint ( "REG   Contents" ) ;
+  dbgprint ( "---   -----" ) ;
+  for ( i = 0 ; i <= SCI_num_registers ; i++ )
+  {
+    regbuf[i] = read_register ( i ) ;
+  }
+  for ( i = 0 ; i <= SCI_num_registers ; i++ )
+  {
+    delay ( 5 ) ;
+    dbgprint ( "%3X - %5X", i, regbuf[i] ) ;
+  }
+}
+
+void VS1053::AdjustRate ( long ppm2 )
+{
+  write_register ( SCI_WRAMADDR, 0x1e07 ) ;
+  write_register ( SCI_WRAM,     ppm2 ) ;
+  write_register ( SCI_WRAM,     ppm2 >> 16 ) ;
+  // oldClock4KHz = 0 forces  adjustment calculation when rate checked.
+  write_register ( SCI_WRAMADDR, 0x5b1c ) ;
+  write_register ( SCI_WRAM,     0 ) ;
+  // Write to AUDATA or CLOCKF checks rate and recalculates adjustment.
+  write_register ( SCI_AUDATA,   read_register ( SCI_AUDATA ) ) ;
+}
+
 
 // The object for the MP3 player
-VS1053 vs1053player (  VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
+VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 
-//  The object for LCD
+
 #if defined ( USELCD )
-  LiquidCrystal_I2C lcd ( LCD_ADDR, LCD_LENGTH, LCD_HEIGHT ) ;
+//***************************************************************************************************
+//*  LCD2004.h -- Driver for LCD 2004 display with I2C backpack.                                    *
+//***************************************************************************************************
+// The backpack communicates with the I2C bus and converts the serial data to parallel for the      *
+// 2004 board.  In the serial data, the 8 bits are assigned as follows:                             *
+// Bit   Destination  Description                                                                   *
+// ---   -----------  ------------------------------------                                          *
+//  0    RS           H=data, L=command                                                             *
+//  1    RW           H=read, L=write.  Only write is used.                                         *
+//  2    E            Enable                                                                        *
+//  3    BL           Backlight, H=on, L=off.  Always on.                                           *
+//  4    D4           Data bit 4                                                                    *
+//  5    D5           Data bit 5                                                                    *
+//  6    D6           Data bit 6                                                                    *
+//  7    D7           Data bit 7                                                                    *
+//***************************************************************************************************
+//
+// Note that the display function are limited due to the minimal available space.
+
+class LCD2004
+{
+  public:
+                     LCD2004 ( uint8_t sda, uint8_t scl ) ; // Constructor
+    void             print ( char c ) ;                     // Send 1 char
+    void             reset() ;                              // Perform reset
+    void             sclear() ;                             // Clear the screen
+    void             shome() ;                              // Go to home position
+    void             scursor ( uint8_t col, uint8_t row ) ; // Position the cursor
+    void             scroll ( bool son ) ;                  // Set scroll on/off
+  private:
+    void             scommand ( uint8_t cmd ) ;
+    void             strobe ( uint8_t cmd ) ;
+    void             swrite ( uint8_t val, uint8_t rs ) ;
+    void             write_cmd ( uint8_t val ) ;
+    void             write_data ( uint8_t val ) ;
+    uint8_t          bl  = FLAG_BACKLIGHT_ON ;              // Backlight in every command
+    uint8_t          xchar = 0 ;                            // Current cursor position (text)
+    uint8_t          ychar = 0 ;                            // Current cursor position (text)
+} ;
+
+LCD2004* lcd = NULL ;
+
+bool dsp_begin()
+{
+  dbgprint ( "Init LCD2004, I2C pins %d,%d", SDA_PIN, SCL_PIN ) ;
+  if ( ( SDA_PIN >= 0 ) && ( SCL_PIN >= 0 ) )
+  {
+    lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;               // Create an instance for LCD
+  }
+  else
+  {
+    dbgprint ( "Init LCD2004 failed!" ) ;
+  }
+  return ( lcd != NULL ) ;
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4  write functions                                *
+//***********************************************************************************************
+// Write functins for command, data and general.                                                *
+//***********************************************************************************************
+void LCD2004::swrite ( uint8_t val, uint8_t rs )          // General write, 8 bits data
+{
+  strobe ( ( val & 0xf0 ) | rs ) ;                        // Send 4 LSB bits
+  strobe ( ( val << 4 ) | rs ) ;                          // Send 4 MSB bits
+}
+
+
+void LCD2004::write_data ( uint8_t val )
+{
+  swrite ( val, FLAG_RS_DATA ) ;                           // Send data (RS = HIGH)
+}
+
+
+void LCD2004::write_cmd ( uint8_t val )
+{
+  swrite ( val, FLAG_RS_COMMAND ) ;                        // Send command (RS = LOW)
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S T R O B E                                  *
+//***********************************************************************************************
+// Send data followed by strobe to clock data to LCD.                                           *
+//***********************************************************************************************
+void LCD2004::strobe ( uint8_t cmd )
+{
+  scommand ( cmd | FLAG_ENABLE ) ;                  // Send command with E high
+  scommand ( cmd ) ;                                // Same command with E low
+  delayMicroseconds ( DELAY_ENABLE_PULSE_SETTLE ) ; // Wait a short time
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S C O M M A N D                              *
+//***********************************************************************************************
+// Send a command to the LCD.                                                                   *
+// Actual I/O.  Open a channel to the I2C interface and write one byte.                         *
+//***********************************************************************************************
+void LCD2004::scommand ( uint8_t cmd )
+{
+  Wire.beginTransmission ( I2C_ADDRESS ) ;
+  Wire.write ( cmd | FLAG_BACKLIGHT_ON ) ;
+  Wire.endTransmission() ;
+}
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: P R I N T                                    *
+//***********************************************************************************************
+// Put a character in the buffer.                                                               *
+//***********************************************************************************************
+void LCD2004::print ( char c )
+{
+  write_data ( c ) ;
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S C U R S O R                                *
+//***********************************************************************************************
+// Place the cursor at the requested position.                                                  *
+//***********************************************************************************************
+void LCD2004::scursor ( uint8_t col, uint8_t row )
+{
+  const int row_offsets[] = { 0x00, 0x40, 0x14, 0x54 } ;
+  
+  write_cmd ( COMMAND_SET_DDRAM_ADDR |
+              ( col + row_offsets[row] ) ) ; 
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S C L E A R                                  *
+//***********************************************************************************************
+// Clear the LCD.                                                                               *
+//***********************************************************************************************
+void LCD2004::sclear()
+{
+  write_cmd ( COMMAND_CLEAR_DISPLAY ) ;
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S C R O L L                                  *
+//***********************************************************************************************
+// Set scrolling on/off.                                                                        *
+//***********************************************************************************************
+void LCD2004::scroll ( bool son )
+{
+  uint8_t ecmd = COMMAND_ENTRY_MODE_SET |               // Assume no scroll
+                 FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT ;
+
+  if ( son )                                            // Scroll on?
+  {
+    ecmd |= FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON ;        // Yes, change function
+  }
+  write_cmd ( ecmd ) ;                                  // Perform command
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: S H O M E                                    *
+//***********************************************************************************************
+// Go to home position.                                                                         *
+//***********************************************************************************************
+void LCD2004::shome()
+{
+  write_cmd ( COMMAND_RETURN_HOME ) ;
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4 :: R E S E T                                    *
+//***********************************************************************************************
+// Reset the LCD.                                                                               *
+//***********************************************************************************************
+void LCD2004::reset()
+{
+  scommand ( 0 ) ;                                // Put expander to known state
+  delayMicroseconds ( 1000 ) ;
+  for ( int i = 0 ; i < 3 ; i++ )                 // Repeat 3 times
+  {
+    strobe ( 0x03 << 4 ) ;                        // Select 4-bit mode
+    delayMicroseconds ( 4500 ) ;
+  }
+  strobe ( 0x02 << 4 ) ;                          // 4-bit
+  delayMicroseconds ( 4500 ) ;
+  write_cmd ( COMMAND_FUNCTION_SET |
+              FLAG_FUNCTION_SET_MODE_4BIT |
+              FLAG_FUNCTION_SET_LINES_2 |
+              FLAG_FUNCTION_SET_DOTS_5X8 ) ;
+  write_cmd ( COMMAND_DISPLAY_CONTROL |
+              FLAG_DISPLAY_CONTROL_DISPLAY_ON ) ;
+  sclear() ;
+  write_cmd ( COMMAND_ENTRY_MODE_SET |
+              FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT ) ;
+  shome() ;
+}
+
+
+//***********************************************************************************************
+//                                L C D 2 0 0 4                                                 *
+//***********************************************************************************************
+// Constructor for the display.                                                                 *
+//***********************************************************************************************
+LCD2004::LCD2004 ( uint8_t sda, uint8_t scl )
+{
+  Wire.begin ( sda, scl ) ;
+  delay(10);
+  Wire.setClock ( 100000UL ) ;                        //experimental! ESP8266 i2c bus speed: 100kHz..400kHz/100000UL..400000UL, default 100000UL
+  Wire.setClockStretchLimit ( 230 ) ;                 //experimental! default 230
+  Wire.beginTransmission ( I2C_ADDRESS ) ;
+  if ( Wire.endTransmission() != 0 )
+  {
+    dbgprint ( "LCD2004 connection error!" ) ;        //safety check, make sure the PCF8574 is connected
+  }
+  reset() ;
+}
+
+struct dsp_str
+{
+  String          str ;
+  uint16_t        len ;                                 // Length of string to show
+  uint16_t        pos ;                                 // Start on this position of string
+  uint8_t         row ;                                 // Row on display  
+} ;
+
+dsp_str dline[4] = { { "", 0, 0, 0 },
+                     { "", 0, 0, 0 },
+                     { "", 0, 0, 0 },
+                     { "", 0, 0, 0 }
+                   } ;
+
+//***********************************************************************************************
+//                                D S P _U P D A T E _ L I N E                                  *
+//***********************************************************************************************
+// Show a selected line                                                                         *
+//***********************************************************************************************
+void dsp_update_line ( uint8_t lnr )
+{
+  uint8_t         i ;                                   // Index in string
+  const char*     p ;
+
+  p = dline[lnr].str.c_str() ;
+  dline[lnr].len = strlen ( p ) ;
+  //dbgprint ( "Strlen is %d, str is %s", len, p ) ;
+  if ( dline[lnr].len > dsp_getwidth() )
+  {
+    if ( dline[lnr].pos >= dline[lnr].len )
+    {
+      dline[lnr].pos = 0 ;
+    }
+    else
+    {
+      p += dline[lnr].pos ;
+    }
+    dline[lnr].len -= dline[lnr].pos ;
+    if ( dline[lnr].len > dsp_getwidth() )
+    {
+      dline[lnr].len = dsp_getwidth() ;
+    }
+  }
+  else
+  {
+    dline[lnr].pos = 0 ;                             // String fits on screen
+  }
+  dline[lnr].pos++ ;
+  lcd->scursor ( 0, lnr ) ;
+  for ( i = 0 ; i < dline[lnr].len ; i++ )
+  {
+    if ( ( *p >= ' ' ) && ( *p <= '~' ) )            // Printable?
+    {
+      lcd->print ( *p ) ;                            // Yes
+    }
+    else
+    {
+      lcd->print ( ' ' ) ;                           // Yes, print space
+    }
+    p++ ;
+  }
+  for ( i = 0 ; i < ( dsp_getwidth() - dline[lnr].len ) ; i++ )  // Fill remainder
+  {
+    lcd->print ( ' ' ) ;
+  }
+  if ( *p == '\0' )                                  // At end of line?
+  {
+    dline[lnr].pos = 0 ;                             // Yes, start allover
+  }
+}
+
+
+//***********************************************************************************************
+//                                D S P _U P D A T E                                            *
+//***********************************************************************************************
+// Show a selection of the 4 sections                                                           *
+//***********************************************************************************************
+void dsp_update()
+{
+  static uint16_t cnt = 0 ;                             // Reduce updates
+
+  if ( cnt++ != 8 )                                     // Action every 8 calls
+  {
+    return ;
+  }
+  cnt = 0 ;
+  dline[2].str.trim() ;                                 // Remove non printing
+  dline[1].str.trim() ;                                 // Remove non printing
+  if ( dline[2].str.length() > dsp_getwidth() )
+  {
+    dline[2].str += String ( "  " ) ;
+  }
+  if ( dline[1].str.length() > dsp_getwidth() )
+  {
+    dline[1].str += String ( "  " ) ;
+  }
+  dsp_update_line ( 1 ) ;
+  dsp_update_line ( 2 ) ;
+}
+
+
+//**************************************************************************************************
+//                                      D I S P L A Y V O L U M E                                  *
+//**************************************************************************************************
+// Display volume for this type of display.                                                        *
+// line 3 will be used.                                                                            *
+//**************************************************************************************************
+void displayvolume()
+{
+  static uint8_t   oldvol = 0 ;                       // Previous volume
+  uint8_t          newvol ;                           // Current setting
+  uint16_t         pos ;                              // Positon of volume indicator
+
+  dline[3].str = "";
+
+  newvol = vs1053player.getVolume() ;                 // Get current volume setting
+  if ( newvol != oldvol )                             // Volume changed?
+  {
+    oldvol = newvol ;                                 // Remember for next compare
+    pos = map ( newvol, 0, 100, 0, dsp_getwidth() ) ; // Compute end position on TFT
+    for ( int i = 0 ; i < dsp_getwidth() ; i++ )      // Set oldstr to dots
+    {
+      if ( i <= pos )
+      {
+        dline[3].str += "#" ;                         // Add hash character
+      }
+      else
+      {
+        dline[3].str += " " ;                         // Or blank sign
+      }
+    }
+    dsp_update_line ( 3 ) ;
+  }
+}
+
+
+//**************************************************************************************************
+//                                      D I S P L A Y T I M E                                      *
+//**************************************************************************************************
+// Display date and time to LCD line 0.                                                            *
+//**************************************************************************************************
+void displaytime ( const char* str )
+{
+  const char* WDAYS [] = { "???", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" } ;
+  char        datetxt[24] ;
+  static char oldstr = '\0' ;                            // To check time difference
+
+  if ( ( str == NULL ) || ( str[0] == '\0' ) )           // Check time string
+  {
+    return ;                                             // Not okay, return
+  }
+  else
+  {
+    if ( str[7] == oldstr )                              // Difference?
+    {
+      return ;                                           // No, quick return
+    }
+    sprintf ( datetxt, "%s %02d.%02d.  %s",              // Format new time to a string
+                       WDAYS[timeinfo.tm_wday],
+                       timeinfo.tm_mday,
+                       timeinfo.tm_mon + 1,
+                       str ) ;
+  }
+  dline[0].str = String ( datetxt ) ;                    // Copy datestring or empty string to LCD line 0   
+  oldstr = str[7] ;                                      // For next compare, last digit of time
+  dsp_update_line ( 0 ) ;
+}
+
+//******************************************************************************************
+//                              U T F 8 A S C I I                                          *
+//******************************************************************************************
+// UTF8-Decoder: convert UTF8-string to extended ASCII.                                    *
+// Convert a single Character from UTF8 to Extended ASCII.                                 *
+// Return "0" if a byte has to be ignored.                                                 *
+//******************************************************************************************
+byte utf8ascii ( byte ascii )
+{
+  static const byte lut_C3[] = 
+         { "AAAAAAACEEEEIIIIDNOOOOO#0UUUU###aaaaaaaceeeeiiiidnooooo##uuuuyyy" } ;
+  static byte       c1 ;              // Last character buffer
+  byte              res = 0 ;         // Result, default 0
+
+  if ( ascii <= 0x7F )                // Standard ASCII-set 0..0x7F handling
+  {
+    c1 = 0 ;
+    res = ascii ;                     // Return unmodified
+  }
+  else
+  {
+    switch ( c1 )                     // Conversion depending on first UTF8-character
+    {   
+      case 0xC2: res = '~' ;
+                 break ;
+      case 0xC3: res = lut_C3[ascii-128] ;
+                 break ;
+      case 0x82: if ( ascii == 0xAC )
+                 {
+                    res = 'E' ;       // Special case Euro-symbol
+                 }
+    }
+    c1 = ascii ;                      // Remember actual character
+  }
+  return res ;                        // Otherwise: return zero, if character has to be ignored
+}
+
+
+//******************************************************************************************
+//                              U T F 8 A S C I I                                          *
+//******************************************************************************************
+// In Place conversion UTF8-string to Extended ASCII (ASCII is shorter!).                  *
+//******************************************************************************************
+void utf8ascii ( char* s )
+{
+  int  i, k = 0 ;                     // Indexes for in en out string
+  char c ;
+
+  for ( i = 0 ; s[i] ; i++ )          // For every input character
+  {
+    c = utf8ascii ( s[i] ) ;          // Translate if necessary
+    if ( c )                          // Good translation?
+    {
+      s[k++] = c ;                    // Yes, put in output string
+    }
+  }
+  s[k] = 0 ;                          // Take care of delimeter
+}
+
+
+//******************************************************************************************
+//                              D I S P L A Y I N F O                                      *
+//******************************************************************************************
+// Show a string on the LCD at a specified y-position in a specified color                 *
+//******************************************************************************************
+void displayinfo ( const char *str, int pos )
+{
+  char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
+
+  strcpy ( buf, str ) ;                         // Make a local copy of the string
+  utf8ascii ( buf ) ;                           // Convert possible UTF8
+  dline[pos].str = buf ;                        // Write o buffer
+  dsp_update_line ( pos ) ;                     // Show on display
+}
+#else
+#define displayinfo(a,b,c)                      // Empty declaration
 #endif
 
 
-//******************************************************************************************
-// SPI RAM routines.                                                                       *
-//******************************************************************************************
-// Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
-//******************************************************************************************
-
-#define SRAM_CS        10                   // GPI1O CS pin
-#define SRAM_FREQ    16e6                   // The 23LC1024 supports theorically up to 20MHz
-
-#define SRAM_SIZE  131072                   // Total size SPI ram in bytes
-#define CHUNKSIZE      32                   // Chunk size
-#define SRAM_CH_SIZE 4096                   // Total size SPI ram in chunks
-
-ESP8266Spiram spiram ( SRAM_CS, SRAM_FREQ ) ;
-
-// Global variables
-uint16_t   chcount ;                       // Number of chunks currently in buffer
-uint32_t   readinx ;                       // Read index
-uint32_t   writeinx ;                      // write index
-
-
-//******************************************************************************************
-//                              S P A C E A V A I L A B L E                                *
-//******************************************************************************************
-// Returns true if bufferspace is available.                                               *
-//******************************************************************************************
-bool spaceAvailable()
+//**************************************************************************************************
+//                                         G E T T I M E                                           *
+//**************************************************************************************************
+// Retrieve the local time from NTP server and convert to string.                                  *
+// Will be called every second.                                                                    *
+//**************************************************************************************************
+bool getLocalTime(struct tm * info, uint32_t ms)
 {
-  return ( chcount < SRAM_CH_SIZE ) ;
+    uint32_t start = millis();
+    time_t now;
+    while((millis()-start) <= ms) {
+        time(&now);
+        localtime_r(&now, info);
+        if(info->tm_year > (2016 - 1900))
+        {
+            return true;
+        }
+        delay(10);
+    }
+    return false;
 }
 
-
-//******************************************************************************************
-//                              D A T A A V A I L A B L E                                  *
-//******************************************************************************************
-// Returns the number of full chunks available in the buffer.                              *
-//******************************************************************************************
-uint16_t dataAvailable()
+void gettime()
 {
-  return chcount ;
-}
+  static int16_t delaycount = 0 ;                         // To reduce number of NTP requests
+  static int16_t retrycount = 100 ;
 
-
-//******************************************************************************************
-//                    G E T F R E E B U F F E R S P A C E                                  *
-//******************************************************************************************
-// Return the free buffer space in chunks.                                                 *
-//******************************************************************************************
-uint16_t getFreeBufferSpace()
-{
-  return ( SRAM_CH_SIZE - chcount ) ;                // Return number of chuinks available
-}
-
-
-//******************************************************************************************
-//                             B U F F E R W R I T E                                       *
-//******************************************************************************************
-// Write one chunk (32 bytes) to SPI RAM.                                                  *
-// No check on available space.  See spaceAvailable().                                     *
-//******************************************************************************************
-void bufferWrite ( uint8_t *b )
-{
-  spiram.write ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ; // Put byte in SRAM
-  writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
-  chcount++ ;                                           // Count number of chunks
-}
-
-
-//******************************************************************************************
-//                             B U F F E R R E A D                                         *
-//******************************************************************************************
-// Read one chunk in the user buffer.                                                      *
-// Assume there is always something in the bufferpace.  See dataAvailable()                *
-//******************************************************************************************
-void bufferRead ( uint8_t *b )
-{
-  spiram.read ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // return next chunk
-  readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
-  chcount-- ;                                          // Count is now one less
-}
-
-
-//******************************************************************************************
-//                            B U F F E R R E S E T                                        *
-//******************************************************************************************
-void bufferReset()
-{
-  readinx = 0 ;                                     // Reset ringbuffer administration
-  writeinx = 0 ;
-  chcount = 0 ;
-}
-
-
-//******************************************************************************************
-//                                S P I R A M S E T U P                                    *
-//******************************************************************************************
-void spiramSetup()
-{
-  spiram.begin() ;                                  // Init ESP8266Spiram
-  bufferReset() ;                                   // Reset ringbuffer administration
+  if ( timeinfo.tm_year )                                 // Legal time found?
+  {
+    sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
+              timeinfo.tm_hour,
+              timeinfo.tm_min,
+              timeinfo.tm_sec ) ;
+  }
+  if ( --delaycount <= 0 )                                // Sync every few hours
+  {
+    delaycount = 7200 ;                                   // Reset counter
+    if ( timeinfo.tm_year )                               // Legal time found?
+    {
+      dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
+    }
+    dbgprint ( "Sync TOD" ) ;
+    if ( !getLocalTime ( &timeinfo, 5000 ) )              // Read from NTP server
+    {
+      dbgprint ( "Failed to obtain time!" ) ;             // Error
+      timeinfo.tm_year = 0 ;                              // Set current time to illegal
+      if ( retrycount )                                   // Give up syncing?
+      {
+        retrycount-- ;                                    // No try again
+        delaycount = 5 ;                                  // Retry after 5 seconds
+      }
+    }
+    else
+    {
+      sprintf ( timetxt, "%02d:%02d:%02d",                // Format new time to a string
+                timeinfo.tm_hour,
+                timeinfo.tm_min,
+                timeinfo.tm_sec ) ;
+      dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
+    }
+  }
 }
 
 
@@ -357,11 +1224,11 @@ inline uint16_t ringavail()
 {
   if ( usespiram )
   {
-    return dataAvailable() ;            // Return number of chunks filled
+    return dataAvailable() ;          // Return number of chunks filled
   }
   else
   {
-    return rcount ;                     // Return number of bytes available
+    return rcount ;                   // Return number of bytes available
   }
 }
 
@@ -442,66 +1309,6 @@ void emptyring()
     rbrindex = RINGBFSIZ - 1 ;
     rcount = 0 ;
   }
-}
-
-
-//******************************************************************************************
-//                              U T F 8 A S C I I                                          *
-//******************************************************************************************
-// UTF8-Decoder: convert UTF8-string to extended ASCII.                                    *
-// Convert a single Character from UTF8 to Extended ASCII.                                 *
-// Return "0" if a byte has to be ignored.                                                 *
-//******************************************************************************************
-byte utf8ascii ( byte ascii )
-{
-  static const byte lut_C3[] = 
-         { "AAAAAAACEEEEIIIIDNOOOOO#0UUUU###aaaaaaaceeeeiiiidnooooo##uuuuyyy" } ;
-  static byte       c1 ;              // Last character buffer
-  byte              res = 0 ;         // Result, default 0
-
-  if ( ascii <= 0x7F )                // Standard ASCII-set 0..0x7F handling
-  {
-    c1 = 0 ;
-    res = ascii ;                     // Return unmodified
-  }
-  else
-  {
-    switch ( c1 )                     // Conversion depending on first UTF8-character
-    {   
-      case 0xC2: res = '~' ;
-                 break ;
-      case 0xC3: res = lut_C3[ascii-128] ;
-                 break ;
-      case 0x82: if ( ascii == 0xAC )
-                 {
-                    res = 'E' ;       // Special case Euro-symbol
-                 }
-    }
-    c1 = ascii ;                      // Remember actual character
-  }
-  return res ;                        // Otherwise: return zero, if character has to be ignored
-}
-
-
-//******************************************************************************************
-//                              U T F 8 A S C I I                                          *
-//******************************************************************************************
-// In Place conversion UTF8-string to Extended ASCII (ASCII is shorter!).                  *
-//******************************************************************************************
-void utf8ascii ( char* s )
-{
-  int  i, k = 0 ;                     // Indexes for in en out string
-  char c ;
-
-  for ( i = 0 ; s[i] ; i++ )          // For every input character
-  {
-    c = utf8ascii ( s[i] ) ;          // Translate if necessary
-    if ( c )                          // Good translation?
-    {
-      s[k++] = c ;                    // Yes, put in output string
-    }
-  }
-  s[k] = 0 ;                          // Take care of delimeter
 }
 
 
@@ -759,11 +1566,31 @@ void testfile ( String fspec )
 //******************************************************************************************
 void timer100()
 {
-  static int     count10sec = 0 ;                 // Counter for activatie 10 seconds process
+  static int     count10sec = 0 ;                 // Counter for activate 10 seconds process
+  static int     count1sec = 0 ;                  // Counter for 1 second
   uint16_t       v ;                              // Analog input value 0..1023
   static uint8_t aoldval = 0 ;                    // Previous value of analog input switch
   uint8_t        anewval ;                        // New value of analog input switch (0..3)
   uint8_t        oldvol ;
+
+  if ( ++count1sec == 10  )                       // 1 second passed?
+  {
+    scrollflag = true ;                           // Yes, request scroll of LCD
+    count1sec = 0 ;                               // Reset count
+    if ( ++timeinfo.tm_sec >= 60 )                // Yes, update number of seconds
+    {
+      timeinfo.tm_sec = 0 ;                       // Wrap after 60 seconds
+      if ( ++timeinfo.tm_min >= 60 )
+      {
+        timeinfo.tm_min = 0 ;                     // Wrap after 60 minutes
+        if ( ++timeinfo.tm_hour >= 24 )
+        {
+          timeinfo.tm_hour = 0 ;                  // Wrap after 24 hours
+        }
+      }
+    }
+    time_req = true ;                             // Yes, show current time request
+  }
 
   if ( ++count10sec == 100  )                     // 10 seconds passed?
   {
@@ -797,91 +1624,95 @@ void timer100()
   }
 // Check for and execute new IR remote control commands
 #if defined(USEIRRECV)
-  if (irrecv.decode(&decodedIRCommand)) {
+  if (irrecv.decode(&decodedIRCommand))
+  {
     dbgprint ("IR Command received");
     oldvol = vs1053player.getVolume();
-    if (decodedIRCommand.value == IRCODEVOLDOWN) {
+    if (decodedIRCommand.value == IRCODEVOLDOWN)
+    {
       oldvol = vs1053player.getVolume();
       ini_block.reqvol = oldvol - 2;
+      dbgprint ("Volume now is %d", ini_block.reqvol);
     }
-    if (decodedIRCommand.value == IRCODEVOLUP) {
+    if (decodedIRCommand.value == IRCODEVOLUP)
+    {
       oldvol = vs1053player.getVolume();
       ini_block.reqvol = oldvol + 2;
+      dbgprint ("Volume now is %d", ini_block.reqvol);
     }
     if (ini_block.reqvol < 0) ini_block.reqvol = 0;
     if (ini_block.reqvol > 100) ini_block.reqvol = 100;
-    dbgprint ("Volume now is %d", ini_block.reqvol);
 
-    if (decodedIRCommand.value == IRCODEPREV) {
+    if (decodedIRCommand.value == IRCODEPREV)
+    {
       ini_block.newpreset = currentpreset - 1;
       dbgprint ("IR Command: previous station");
     }
-    if (decodedIRCommand.value == IRCODENEXT) {
+    if (decodedIRCommand.value == IRCODENEXT)
+    {
       ini_block.newpreset = currentpreset + 1;
       dbgprint ("IR Command: next radio station");
     }
-    if (decodedIRCommand.value == IRCODEHOME) {
-      ini_block.newpreset = 0;
-      dbgprint ("IR Command: home station");
-    }
-    if (decodedIRCommand.value == IRCODEMUTE) {
+    if (decodedIRCommand.value == IRCODEMUTE)
+    {
       muteflag = !muteflag;
       dbgprint ("IR Command: mute");
+    }
+    if (decodedIRCommand.value == IRCODPRESET00)
+    {
+      ini_block.newpreset = 0;
+      dbgprint ("IR Command: preset_00");
+    }
+    if (decodedIRCommand.value == IRCODPRESET01)
+    {
+      ini_block.newpreset = 1;
+      dbgprint ("IR Command: preset_01");
+    }
+    if (decodedIRCommand.value == IRCODPRESET02)
+    {
+      ini_block.newpreset = 2;
+      dbgprint ("IR Command: preset_02");
+    }
+    if (decodedIRCommand.value == IRCODPRESET03)
+    {
+      ini_block.newpreset = 3;
+      dbgprint ("IR Command: preset_03");
+    }
+    if (decodedIRCommand.value == IRCODPRESET04)
+    {
+      ini_block.newpreset = 4;
+      dbgprint ("IR Command: preset_04");
+    }
+    if (decodedIRCommand.value == IRCODPRESET05)
+    {
+      ini_block.newpreset = 5;
+      dbgprint ("IR Command: preset_05");
+    }
+    if (decodedIRCommand.value == IRCODPRESET06)
+    {
+      ini_block.newpreset = 6;
+      dbgprint ("IR Command: preset_06");
+    }
+    if (decodedIRCommand.value == IRCODPRESET07)
+    {
+      ini_block.newpreset = 7;
+      dbgprint ("IR Command: preset_07");
+    }
+    if (decodedIRCommand.value == IRCODPRESET08)
+    {
+      ini_block.newpreset = 8;
+      dbgprint ("IR Command: preset_08");
+    }
+    if (decodedIRCommand.value == IRCODPRESET09)
+    {
+      ini_block.newpreset = 9;
+      dbgprint ("IR Command: preset_09");
     }
     irrecv.resume();  // Get ready to receive next IR command
   }
 #endif
 }
 
-
-//******************************************************************************************
-//                              D I S P L A Y V O L U M E                                  *
-//******************************************************************************************
-// Show the current volume as an indicator on the screen.                                  *
-//******************************************************************************************
-void displayvolume()
-{
-#if defined ( USELCD )
-  static uint8_t   oldvol = 0 ;                       // Previous volume
-  uint8_t          newvol ;                           // Current setting
-  uint16_t         pos ;                              // Positon of volume indicator
-
-  if ( vs1053player.getVolume() != oldvol )
-  {
-    oldvol = newvol ;                                 // Remember for next compare
-    pos = map ( newvol, 0, 100, 0, 20 ) ;             // Compute end position on LCD
-    for ( int i=0; i < pos; i++)
-      {
-        lcd.setCursor(i, 3);   
-        lcd.print("#");
-        //lcd.write(0x7F);
-      }
-  }
-#endif
-}
-
-//******************************************************************************************
-//                              D I S P L A Y I N F O                                      *
-//******************************************************************************************
-// Show a string on the LCD at a specified y-position in a specified color                 *
-//******************************************************************************************
-#if defined ( USELCD )
-void displayinfo ( const char *str, int pos, int clr )
-{
- if (clr == 1)
-  {
-   lcd.clear();
-  }
-  char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
-  strcpy ( buf, str ) ;                         // Make a local copy of the string
-  utf8ascii ( buf ) ;                           // Convert possible UTF8
-  lcd.setCursor ( 0, pos ) ;                    // Prepare to show the info
-  lcd.autoscroll() ;                            // Set diplay to scroll automatically
-  lcd.print ( buf ) ;                           // Show the string
-}
-#else
-#define displayinfo(a,b,c)                      // Empty declaration
-#endif
 
 //******************************************************************************************
 //                        S H O W S T R E A M T I T L E                                    *
@@ -936,9 +1767,7 @@ void showstreamtitle ( const char *ml, bool full )
     }
     strcpy ( p1, p2 ) ;                         // Shift 2nd part of title 2 or 3 places
   }
-  #if defined ( USELCD )
-  displayinfo ( streamtitle, 0, 1 ) ;           // Name of Song & Detail
-  #endif
+  displayinfo ( streamtitle, 2 ) ;              // Name of Song & Detail
 }
 
 
@@ -979,9 +1808,9 @@ bool connecttohost()
 
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
-  #if defined ( USELCD )
-    displayinfo ( "   ** Internet radio **", 0, 1 ) ;
-  #endif
+  displayinfo ( "** Internet radio **", 1 ) ;
+  displaytime ( "" ) ;                              // Clear time on LCD screen
+
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
   if ( host.endsWith ( ".m3u" ) )                   // Is it an m3u playlist?
@@ -1010,9 +1839,7 @@ bool connecttohost()
   }
   pfs = dbgprint ( "Connect to %s on port %d, extension %s",
                    hostwoext.c_str(), port, extension.c_str() ) ;
-  #if defined ( USELCD )
-  displayinfo( pfs, 0, 1 ) ;                        // Preset No.
-  #endif
+  displayinfo ( pfs, 2 ) ;                          // Preset No.
   mp3client = new WiFiClient() ;
   if ( mp3client->connect ( hostwoext.c_str(), port ) )
   {
@@ -1042,9 +1869,7 @@ bool connecttofile()
 {
   String path ;                                           // Full file spec
   char*  p ;                                              // Pointer to filename
-  #if defined ( USELCD )
-  displayinfo ( "   **** MP3 Player ****", 0, 1 ) ;
-  #endif
+  displayinfo ( "**** MP3 Player ****", 1 ) ;
   path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
   mp3file = LittleFS.open ( path, "r" ) ;                 // Open the file
   if ( !mp3file )
@@ -1054,9 +1879,7 @@ bool connecttofile()
   }
   p = (char*)path.c_str() + 1 ;                           // Point to filename
   showstreamtitle ( p, true ) ;                           // Show the filename as title
-  #if defined ( USELCD )
-  displayinfo ( "Playing from local file", 0, 1 ) ;       // Show Source at position 60
-  #endif
+  displayinfo ( "Playing from local file", 2 ) ;          // Show Source at position 60
   icyname = "" ;                                          // No icy name yet
   chunked = false ;                                       // File not chunked
   return true ;
@@ -1083,13 +1906,12 @@ bool connectwifi()
     WiFi.softAP ( NAME, NAME ) ;                       // This ESP will be an AP
     delay ( 5000 ) ;
     pfs = dbgprint ( "IP = 192.168.4.1" ) ;            // Address if AP
+    displayinfo ( " AP mode activated ", 2 ) ;
     return false ;
   }
   pfs = dbgprint ( "IP = %d.%d.%d.%d",
                    WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] ) ;
-#if defined ( USELCD )
-    displayinfo( pfs, 1 ,0 ) ;                         // Show IP address
-#endif
+  displayinfo ( pfs, 1 ) ;                             // Show IP address
   return true ;
 }
 
@@ -1676,14 +2498,12 @@ void setup()
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
 #if defined ( USELCD )
-  lcd.begin( LCD_LENGTH, LCD_HEIGHT ) ;
-  lcd.init();                                          // Init LCD interface
-  lcd.backlight();                                     // Turn on the backlight.
-  lcd.setCursor(0, 0);
-  lcd.print ( VERSION ) ;
-  delay(1000);
-  lcd.setCursor(0, 1);
-  lcd.print ( "Starting" ) ;
+  dsp_begin();
+  displayinfo ( VERSION, 0 ) ;
+  delay(3000);
+  displayinfo ( "      ESP-radio     ", 0 ) ;
+  delay(10),
+  displayinfo ( "      Starting      ", 2 ) ;
 #endif
   delay(10);
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
@@ -1730,7 +2550,13 @@ void setup()
     currentpreset = ini_block.newpreset ;              // No network: do not start radio
   }
   delay ( 1000 ) ;                                     // Show IP for a while
+  configTime ( TZ * 3600, DST * 3600, NTP_SERVER ) ;   // GMT offset, daylight offset in seconds
+  timeinfo.tm_year = 0 ;                               // Set TOD to illegal
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
+  if ( NetworkFound )
+  {
+    gettime() ;                                        // Sync time
+  }
   if ( usespiram )
   {
     dbgprint ( "Testing SPIRAM getring/putring" ) ;
@@ -1803,6 +2629,11 @@ void loop()
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
+    if ( usespiram && ( spiramdelay != 0 ) )           // Delay before reading SPIRAM?
+    {
+      spiramdelay-- ;                                  // Yes, count down
+      break ;                                          // and skip handling of data
+    }
     handlebyte_ch ( getring() ) ;                      // Yes, handle it
   }
   yield() ;
@@ -1822,9 +2653,6 @@ void loop()
     vs1053player.stopSong() ;                          // Stop playing
     emptyring() ;                                      // Empty the ringbuffer
     datamode = STOPPED ;                               // Yes, state becomes STOPPED
-#if defined ( USELCD )
-    lcd.clear() ;                                      // Clear screen
-#endif
     delay ( 500 ) ;
   }
   if ( localfile )
@@ -1918,12 +2746,31 @@ void loop()
   {
     vs1053player.setVolume ( ini_block.reqvol ) ;       // Unmute
   }
-  displayvolume() ;                                     // Show volume on display
   if ( testfilename.length() )                          // File to test?
   {
     testfile ( testfilename ) ;                         // Yes, do the test
     testfilename = "" ;                                 // Clear test request
   }
+  if ( time_req && NetworkFound )                       // Time to refresh time?
+  {
+    gettime() ;                                         // Yes, get the current time
+  }
+  #if defined ( USELCD )
+  if ( time_req )                                       // Time to refresh timetxt?
+  {
+    time_req = false ;                                  // Yes, clear request
+    if ( NetworkFound  )                                // Time available?
+    {
+      displaytime ( timetxt ) ;                         // Write to TFT screen
+      displayvolume() ;                                 // Show volume on display
+    }
+  }
+  if ( scrollflag )                                     // Time to scroll?
+  {
+    scrollflag = false ;                                // Yes, reset flag
+    dsp_update() ;                                      // LCD scroll
+  }
+  #endif
   scanserial() ;                                        // Handle serial input
   ArduinoOTA.handle() ;                                 // Check for OTA
 }
@@ -2151,9 +2998,7 @@ void handlebyte ( uint8_t b, bool force )
           icyname = metaline.substring(9) ;            // Get station name
           icyname = decode_spec_chars ( icyname ) ;    // Decode special characters in name
           icyname.trim() ;                             // Remove leading and trailing spaces
-          #if defined ( USELCD )
-          displayinfo ( icyname.c_str(), 0, 1 ) ;      // Show station name
-          #endif
+          displayinfo ( icyname.c_str(), 1 ) ;         // Show station name
         }
         else if ( lcml.startsWith ( "transfer-encoding:" ) )
         {
@@ -2722,7 +3567,7 @@ char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "rate" )                      // Rate command?
   {
-    vs1053player.adjustRate ( ivalue ) ;              // Yes, adjust
+    vs1053player.AdjustRate ( ivalue ) ;              // Yes, adjust
   }
   else if ( argument.startsWith ( "mqtt" ) )          // Parameter fo MQTT?
   {

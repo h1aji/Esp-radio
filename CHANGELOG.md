@@ -1,35 +1,51 @@
 
-Last changes:
-- 05-apr-2018: Fixed crash when no known WiFi network was found.
-- 18-apr-2018: Work-around for wifi.connected() bug.
-- 31-may-2017: Volume indicator on display.
-- 26-may-2017: Correction playing .m3u playlists.
-- 24-may-2017: Correction. Do not skip first part of .mp3 file.
-- 11-may-2017: Convert UTF8 characters before display, thanks to everyb313.
-- 09-may-2017: Fixed issue on analog input.
-- 04-may-2017: Integrate iHeartRadio, thanks to NonaSuomy
-- 03-may-2017: Prevent to start inputstream if no network.
-- 26-feb-2017: Better output webinterface on preset change.
-- 01-feb-2017: Bugfix uploading files.
-- 30-jan-2017: Allow chunked transfer encoding of streams.
-- 23-jan-2017: Correction playlists.
-- 16-jan-2017: Correction playlists.
-- 02-jan-2017: Webinterface in PROGMEM.
-- 28-dec-2016: Add support for resume after stop.
-- 23-dec-2016: Add support for mp3 files on SPIFFS.
-- 15-nov-2016: Support for .m3u files.
-- 22-oct-2016: Correction mute/unmute.
-- 14-oct-2016: Update for AsyncMqttClient version 0.5.0. Added extra documentation for MQTT.
-- 11-oct-2016: Allow stations that do not specify bitrate.  Allow standalone MP3s.
-- 04-oct-2016: Version with MQTT and configuration in radio.ini file.
-- 04-jul-2016: WiFi.disconnect clears old connection now (thanks to Juppit)
-- 27-may-2016: Fixed restore station at restart.
-- 26-may-2016: Bugfix BUTTON3 handling (if no TFT).  Update pdf-document.
-- 23-may-2016: Bugfix EEPROM handling.
-- 17-may-2016: 3 button control over analog or digital input.
-- 13-may-2016: Better detection of Ogg streams.
-- 07-may-2016: Added selection of preset stations to sketch and web page.
-- 06-may-2016: Added hidden SSID, added feature to web page.
-- 04-may-2016, Allow stations like "skonto.ls.lv:8002/mp3".
-- 03-may-2016, Add bass/treble settings (see also new index.html).
-
+- 31-03-2016, ES: First set-up.
+- 01-04-2016, ES: Detect missing VS1053 at start-up.
+- 05-04-2016, ES: Added commands through http server on port 80.
+- 14-04-2016, ES: Added icon and switch preset on stream error.
+- 18-04-2016, ES: Added SPIFFS for webserver.
+- 19-04-2016, ES: Added ringbuffer.
+- 20-04-2016, ES: WiFi Passwords through SPIFFS files, enable OTA.
+- 21-04-2016, ES: Switch to Async Webserver.
+- 27-04-2016, ES: Save settings, so same volume and preset will be used after restart.
+- 03-05-2016, ES: Add bass/treble settings (see also new index.html).
+- 04-05-2016, ES: Allow stations like "skonto.ls.lv:8002/mp3".
+- 06-05-2016, ES: Allow hiddens WiFi station if this is the only .pw file.
+- 07-05-2016, ES: Added preset selection in webserver.
+- 12-05-2016, ES: Added support for Ogg-encoder.
+- 13-05-2016, ES: Better Ogg detection.
+- 17-05-2016, ES: Analog input for commands, extra buttons if no TFT required.
+- 26-05-2016, ES: Fixed BUTTON3 bug (no TFT).
+- 27-05-2016, ES: Fixed restore station at restart.
+- 04-07-2016, ES: WiFi.disconnect clears old connection now (thanks to Juppit).
+- 23-09-2016, ES: Added commands via MQTT and Serial input, Wifi set-up in AP mode.
+- 04-10-2016, ES: Configuration in .ini file. No more use of EEPROM and .pw files.
+- 11-10-2016, ES: Allow stations that have no bitrate in header like icecast.err.ee/raadio2.mp3.
+- 14-10-2016, ES: Updated for async-mqtt-client-master 0.5.0
+- 22-10-2016, ES: Correction mute/unmute.
+- 15-11-2016, ES: Support for .m3u playlists.
+- 22-12-2016, ES: Support for localhost (play from SPIFFS).
+- 28-12-2016, ES: Implement "Resume" request.
+- 31-12-2016, ES: Allow ContentType "text/css".
+- 02-01-2017, ES: Webinterface in PROGMEM.
+- 16-01-2017, ES: Correction playlists.
+- 17-01-2017, ES: Bugfix config page and playlist.
+- 23-01-2017, ES: Bugfix playlist.
+- 26-01-2017, ES: Check on wrong icy-metaint.
+- 30-01-2017, ES: Allow chunked transfer encoding.
+- 01-02-2017, ES: Bugfix file upload.
+- 26-04-2017, ES: Better output webinterface on preset change.
+- 03-05-2017, ES: Prevent to start inputstream if no network.
+- 04-05-2017, ES: Integrate iHeartRadio, thanks to NonaSuomy.
+- 09-05-2017, ES: Fixed abs problem.
+- 11-05-2017, ES: Convert UTF8 characters before display, thanks to everyb313.
+- 24-05-2017, ES: Correction. Do not skip first part of .mp3 file.
+- 26-05-2017, ES: Correction playing from .m3u playlist and LC/UC problem.
+- 31-05-2017, ES: Volume indicator on TFT.
+- 02-02-2018, ES: Force 802.11N connection.
+- 18-04-2018, ES: Workaround for not working wifi.connected().
+- 05-10-2018, ES: Fixed exception if no network was found.
+- 23-04-2018, ES: Check BASS setting.
+- 17-07-2021, ES: SPI RAM LC1024 support added.
+- 19-08-2021, ES: LCD 2004 support added.
+- 10-09-2021, ES: NTP support added.
