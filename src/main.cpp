@@ -23,7 +23,7 @@
 // Use SPIRAM as ringbuffer. false = do not use
 #define SPIRAM true
 #ifdef SPIRAM
-  #include <spiram.h>
+  #include <ESP8266Spiram.h> 
 #endif
 //
 // Define USELCD if you are using LCD 20x4
@@ -55,6 +55,14 @@ extern "C"
 #define VS1053_CS     15
 #define VS1053_DCS    16
 #define VS1053_DREQ   2
+//
+//SPI RAM settings
+#define SRAM_CS        10                   // GPIO1O CS pin
+#define SRAM_FREQ    16e6                   // The 23LC1024 supports theorically up to 20MHz
+#define SRAM_SIZE  131072                   // Total size SPI ram in bytes
+#define CHUNKSIZE      32                   // Chunk size
+#define SRAM_CH_SIZE 4096                   // Total size SPI ram in chunks
+//
 // Pins for LCD 2004
 #define SDA_PIN 4
 #define SCL_PIN 5
@@ -240,6 +248,9 @@ bool             localfile = false ;                       // Play from local mp
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
 bool             usespiram = SPIRAM ;                      // For check using SPIRAM at runtime
+uint16_t         chcount ;                                 // Number of chunks currently in buffer
+uint32_t         readinx ;                                 // Read index
+uint32_t         writeinx ;                                // write index
 uint8_t          prcwinx ;                                 // Index in pwchunk (see putring)
 uint8_t          prcrinx ;                                 // Index in prchunk (see getring)
 int32_t          spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
@@ -1130,7 +1141,7 @@ void displayinfo ( const char *str, int pos )
   dsp_update_line ( pos ) ;                     // Show on display
 }
 #else
-#define displayinfo(a,b,c)                      // Empty declaration
+#define displayinfo ( a, b )                    // Empty declaration
 #endif
 
 
@@ -1196,6 +1207,99 @@ void gettime()
     }
   }
 }
+
+
+#ifdef SPIRAM
+//******************************************************************************************
+// SPI RAM routines.                                                                       *
+//******************************************************************************************
+// Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
+//******************************************************************************************
+
+ESP8266Spiram spiram ( SRAM_CS, SRAM_FREQ ) ;
+
+//******************************************************************************************
+//                              S P A C E A V A I L A B L E                                *
+//******************************************************************************************
+// Returns true if bufferspace is available.                                               *
+//******************************************************************************************
+bool spaceAvailable()
+{
+  return ( chcount < SRAM_CH_SIZE ) ;
+}
+
+
+//******************************************************************************************
+//                              D A T A A V A I L A B L E                                  *
+//******************************************************************************************
+// Returns the number of full chunks available in the buffer.                              *
+//******************************************************************************************
+uint16_t dataAvailable()
+{
+  return chcount ;
+}
+
+
+//******************************************************************************************
+//                    G E T F R E E B U F F E R S P A C E                                  *
+//******************************************************************************************
+// Return the free buffer space in chunks.                                                 *
+//******************************************************************************************
+uint16_t getFreeBufferSpace()
+{
+  return ( SRAM_CH_SIZE - chcount ) ;                // Return number of chuinks available
+}
+
+
+//******************************************************************************************
+//                             B U F F E R W R I T E                                       *
+//******************************************************************************************
+// Write one chunk (32 bytes) to SPI RAM.                                                  *
+// No check on available space.  See spaceAvailable().                                     *
+//******************************************************************************************
+void bufferWrite ( uint8_t *b )
+{
+  spiram.write ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ; // Put byte in SRAM
+  writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
+  chcount++ ;                                           // Count number of chunks
+}
+
+
+//******************************************************************************************
+//                             B U F F E R R E A D                                         *
+//******************************************************************************************
+// Read one chunk in the user buffer.                                                      *
+// Assume there is always something in the bufferpace.  See dataAvailable()                *
+//******************************************************************************************
+void bufferRead ( uint8_t *b )
+{
+  spiram.read ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // return next chunk
+  readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
+  chcount-- ;                                          // Count is now one less
+}
+
+
+//******************************************************************************************
+//                            B U F F E R R E S E T                                        *
+//******************************************************************************************
+void bufferReset()
+{
+  readinx = 0 ;                                     // Reset ringbuffer administration
+  writeinx = 0 ;
+  chcount = 0 ;
+}
+
+
+//******************************************************************************************
+//                                S P I R A M S E T U P                                    *
+//******************************************************************************************
+void spiramSetup()
+{
+  spiram.begin() ;                                  // Init ESP8266Spiram
+  bufferReset() ;                                   // Reset ringbuffer administration
+}
+
+#endif
 
 
 //******************************************************************************************
@@ -3539,8 +3643,8 @@ char* analyzeCmd ( const char* par, const char* val )
     {
       rcount = dataAvailable() ;                      // Yes, get free space
     }
-    sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d",
-              system_get_free_heap_size(), rcount, mp3client->available() ) ;
+    sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
+              system_get_free_heap_size(), rcount, mp3client->available(), bitrate ) ;
   }
   // Commands for bass/treble control
   else if ( argument.startsWith ( "tone" ) )          // Tone command
