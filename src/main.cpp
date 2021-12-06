@@ -22,9 +22,7 @@
 //
 // Use SPIRAM as ringbuffer. false = do not use
 #define SPIRAM true
-#ifdef SPIRAM
-  #include <ESP8266Spiram.h> 
-#endif
+#include <ESP8266Spiram.h>
 //
 // Define USELCD if you are using LCD 20x4
 #define USELCD
@@ -34,7 +32,7 @@
 
 extern "C"
 {
-#include "user_interface.h"
+#include <user_interface.h>
 }
 
 // Definitions for 3 control switches on analog input
@@ -56,12 +54,17 @@ extern "C"
 #define VS1053_DCS    16
 #define VS1053_DREQ   2
 //
-//SPI RAM settings
-#define SRAM_CS        10                   // GPIO1O CS pin
-#define SRAM_FREQ    16e6                   // The 23LC1024 supports theorically up to 20MHz
-#define SRAM_SIZE  131072                   // Total size SPI ram in bytes
-#define CHUNKSIZE      32                   // Chunk size
-#define SRAM_CH_SIZE 4096                   // Total size SPI ram in chunks
+// SPI RAM settings
+// GPIO 1O CS pin
+#define SRAM_CS        10
+// 23LC1024 supports theorically up to 20MHz
+#define SRAM_FREQ    16e6
+// Total size SPI ram in bytes
+#define SRAM_SIZE  131072
+// Chunk size
+#define CHUNKSIZE      32
+// Total size SPI ram in chunks
+#define SRAM_CH_SIZE 4096
 //
 // Pins for LCD 2004
 #define SDA_PIN 4
@@ -281,11 +284,11 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 //******************************************************************************************
 // Pages and CSS for the webinterface.                                                     *
 //******************************************************************************************
-#include <about_html.h>
-#include <config_html.h>
-#include <index_html.h>
-#include <radio_css.h>
-#include <favicon_ico.h>
+#include "about_html.h"
+#include "config_html.h"
+#include "index_html.h"
+#include "radio_css.h"
+#include "favicon_ico.h"
 
 //
 //******************************************************************************************
@@ -1209,7 +1212,6 @@ void gettime()
 }
 
 
-#ifdef SPIRAM
 //******************************************************************************************
 // SPI RAM routines.                                                                       *
 //******************************************************************************************
@@ -1298,8 +1300,6 @@ void spiramSetup()
   spiram.begin() ;                                  // Init ESP8266Spiram
   bufferReset() ;                                   // Reset ringbuffer administration
 }
-
-#endif
 
 
 //******************************************************************************************
@@ -2004,18 +2004,23 @@ bool connectwifi()
   WiFi.begin ( ini_block.ssid.c_str(),
                ini_block.passwd.c_str() ) ;            // Connect to selected SSID
   dbgprint ( "Try WiFi %s", ini_block.ssid.c_str() ) ; // Message to show during WiFi connect
+
   if (  WiFi.waitForConnectResult() != WL_CONNECTED )  // Try to connect
   {
     dbgprint ( "WiFi Failed!  Trying to setup AP with name %s and password %s.", NAME, NAME ) ;
     WiFi.softAP ( NAME, NAME ) ;                       // This ESP will be an AP
     delay ( 5000 ) ;
-    pfs = dbgprint ( "IP = 192.168.4.1" ) ;            // Address if AP
+    pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Address if AP
     displayinfo ( " AP mode activated ", 2 ) ;
     return false ;
   }
-  pfs = dbgprint ( "IP = %d.%d.%d.%d",
-                   WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] ) ;
-  displayinfo ( pfs, 1 ) ;                             // Show IP address
+
+  pfs = dbgprint ( "  IP = %d.%d.%d.%d  ",
+                   WiFi.localIP()[0], 
+                   WiFi.localIP()[1], 
+                   WiFi.localIP()[2], 
+                   WiFi.localIP()[3] ) ;
+  displayinfo ( pfs, 3 ) ;                             // Show IP address
   return true ;
 }
 
