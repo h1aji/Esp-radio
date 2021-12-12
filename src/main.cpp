@@ -1,11 +1,11 @@
 //******************************************************************************************
-//*  Esp_radio -- Webradio receiver for ESP8266, display and VS1053 MP3 module,            *
-//*               by Ed Smallenburg (ed@smallenburg.nl)                                    *
+//*  Esp-radio - Webradio receiver for ESP8266, display and VS1053 MP3 module,             *
+//*              by Ed Smallenburg (ed@smallenburg.nl)                                     *
 //******************************************************************************************
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 13 Dec 2021"
+#define VERSION "Sun, 12 Dec 2021 12:10:00 GMT"
 //
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
@@ -19,16 +19,6 @@
 #include <TinyXML.h>
 #include <LittleFS.h>
 #include <time.h>
-//
-// Use SPIRAM as ringbuffer. false = do not use
-#define SPIRAM true
-#include <ESP8266Spiram.h>
-//
-// Define USELCD if you are using LCD 20x4
-#define USELCD
-#if defined ( USELCD )
-  #include <Wire.h>
-#endif
 
 extern "C"
 {
@@ -54,21 +44,50 @@ extern "C"
 #define VS1053_DCS    16
 #define VS1053_DREQ   2
 //
+// Use SPIRAM as ringbuffer. false = do not use
+#define SPIRAM true
+#include <ESP8266Spiram.h>
 // SPI RAM settings
 // GPIO 1O CS pin
-#define SRAM_CS        10
+#define SRAM_CS           10
 // 23LC1024 supports theorically up to 20MHz
-#define SRAM_FREQ    16e6
+#define SRAM_FREQ         16e6
 // Total size SPI ram in bytes
-#define SRAM_SIZE  131072
+#define SRAM_SIZE         131072
 // Chunk size
-#define CHUNKSIZE      32
+#define CHUNKSIZE         32
 // Total size SPI ram in chunks
-#define SRAM_CH_SIZE 4096
+#define SRAM_CH_SIZE      4096
+// Delay (in bytes) before reading from SPIRAM
+#define SPIRAMDELAY       200000
+// Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
+#define RINGBFSIZ         20000
+// Debug buffer size
+#define DEBUG_BUFFER_SIZE 100
+// Name of the ini file
+#define INIFILENAME "/radio.ini"
+// Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
+// Not that the password of an AP must be at least as long as 8 characters.
+// Also used for other naming.
+#define NAME "Esp-radio"
+// Maximum number of MQTT reconnects before give-up
+#define MAXMQTTCONNECTS 20
 //
+// NTP settings
+// Default NZ time zone
+#define TZ         12
+// DST is +1 hour
+#define DST        1
+// Default server for NTP
+#define NTP_SERVER "pool.ntp.org"
+//
+// Define USELCD if you are using LCD 20x4
+#define USELCD
+#if defined ( USELCD )
+#include <Wire.h>
 // Pins for LCD 2004
-#define SDA_PIN 4
-#define SCL_PIN 5
+#define SDA_PIN     4
+#define SCL_PIN     5
 // Adjust for your display
 #define I2C_ADDRESS 0x27
 // Enable ACK for I2C communication
@@ -101,54 +120,35 @@ extern "C"
 #define dsp_setCursor(a,b)                                   // Position the cursor
 #define dsp_getwidth()                      20               // Get width of screen
 #define dsp_getheight()                     4                // Get height of screen
-//
-// Delay (in bytes) before reading from SPIRAM
-#define SPIRAMDELAY 200000
-// Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-#define RINGBFSIZ 20000
-// Debug buffer size
-#define DEBUG_BUFFER_SIZE 100
-// Name of the ini file
-#define INIFILENAME "/radio.ini"
-// Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
-// Not that the password of an AP must be at least as long as 8 characters.
-// Also used for other naming.
-#define NAME "Esp-radio"
-// Maximum number of MQTT reconnects before give-up
-#define MAXMQTTCONNECTS 20
-//
-// NTP settings
-#define TZ         12                                       // Default NZ time zone
-#define DST        1                                        // DST is +1 hour
-#define NTP_SERVER "pool.ntp.org"                           // Default server for NTP
+#endif
 //
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
-#define USEIRRECV
-#if defined ( USEIRRECV )
- // IR receiver pin, 0 for GPIO0
-uint16_t IRRECV_PIN = 0;
-// IRremote button definitions. Read out using Examples->IRremoteESP8266->IRrecvDemo.ino
-#define IRCODEVOLDOWN   0xFFA857
-#define IRCODEVOLUP     0xFF906F
-#define IRCODEPREV      0xFF02FD
-#define IRCODENEXT      0xFFC23D
-#define IRCODEMUTE      0xFFE21D
-#define IRCODPRESET00   0xFF6897
-#define IRCODPRESET01   0xFF30CF
-#define IRCODPRESET02   0xFF18E7
-#define IRCODPRESET03   0xFF7A85
-#define IRCODPRESET04   0xFF10EF
-#define IRCODPRESET05   0xFF38C7
-#define IRCODPRESET06   0xFF5AA5
-#define IRCODPRESET07   0xFF42BD
-#define IRCODPRESET08   0xFF4AB5
-#define IRCODPRESET09   0xFF52AD
+#define USEIR
+#if defined ( USEIR )
 #include <IRremoteESP8266.h>
 #include <IRrecv.h>
 #include <IRutils.h>
-IRrecv irrecv(IRRECV_PIN);
-decode_results decodedIRCommand;
+// IR receiver pin, 0 for GPIO 0
+uint16_t IRRECV_PIN = 0;
+IRrecv irrecv ( IRRECV_PIN ) ;
+decode_results decodedIRCommand ;
+// IRremote button definitions
+#define IR_VOLDOWN    0xFFA857
+#define IR_VOLUP      0xFF906F
+#define IR_PREV       0xFF02FD
+#define IR_NEXT       0xFFC23D
+#define IR_MUTE       0xFFE21D
+#define IR_PRESET00   0xFF6897
+#define IR_PRESET01   0xFF30CF
+#define IR_PRESET02   0xFF18E7
+#define IR_PRESET03   0xFF7A85
+#define IR_PRESET04   0xFF10EF
+#define IR_PRESET05   0xFF38C7
+#define IR_PRESET06   0xFF5AA5
+#define IR_PRESET07   0xFF42BD
+#define IR_PRESET08   0xFF4AB5
+#define IR_PRESET09   0xFF52AD
 #endif
 
 
@@ -156,7 +156,6 @@ decode_results decodedIRCommand;
 //******************************************************************************************
 // Forward declaration of various functions                                                *
 //******************************************************************************************
-void   displaytime ( const char* str ) ;
 void   showstreamtitle ( const char* ml, bool full = false ) ;
 void   handlebyte ( uint8_t b, bool force = false ) ;
 void   handlebyte_ch ( uint8_t b, bool force = false ) ;
@@ -1144,7 +1143,8 @@ void displayinfo ( const char *str, int pos )
   dsp_update_line ( pos ) ;                     // Show on display
 }
 #else
-#define displayinfo ( a, b )                    // Empty declaration
+#define displayinfo(a,b)                        // Empty declaration
+#define displaytime(a)
 #endif
 
 
@@ -1727,18 +1727,18 @@ void timer100()
     }
   }
 // Check for and execute new IR remote control commands
-#if defined(USEIRRECV)
+#if defined ( USEIR )
   if (irrecv.decode(&decodedIRCommand))
   {
     dbgprint ("IR Command received");
     oldvol = vs1053player.getVolume();
-    if (decodedIRCommand.value == IRCODEVOLDOWN)
+    if (decodedIRCommand.value == IR_VOLDOWN)
     {
       oldvol = vs1053player.getVolume();
       ini_block.reqvol = oldvol - 2;
       dbgprint ("Volume now is %d", ini_block.reqvol);
     }
-    if (decodedIRCommand.value == IRCODEVOLUP)
+    if (decodedIRCommand.value == IR_VOLUP)
     {
       oldvol = vs1053player.getVolume();
       ini_block.reqvol = oldvol + 2;
@@ -1747,67 +1747,67 @@ void timer100()
     if (ini_block.reqvol < 0) ini_block.reqvol = 0;
     if (ini_block.reqvol > 100) ini_block.reqvol = 100;
 
-    if (decodedIRCommand.value == IRCODEPREV)
+    if (decodedIRCommand.value == IR_PREV)
     {
       ini_block.newpreset = currentpreset - 1;
       dbgprint ("IR Command: previous station");
     }
-    if (decodedIRCommand.value == IRCODENEXT)
+    if (decodedIRCommand.value == IR_NEXT)
     {
       ini_block.newpreset = currentpreset + 1;
       dbgprint ("IR Command: next radio station");
     }
-    if (decodedIRCommand.value == IRCODEMUTE)
+    if (decodedIRCommand.value == IR_MUTE)
     {
       muteflag = !muteflag;
       dbgprint ("IR Command: mute");
     }
-    if (decodedIRCommand.value == IRCODPRESET00)
+    if (decodedIRCommand.value == IR_PRESET00)
     {
       ini_block.newpreset = 0;
       dbgprint ("IR Command: preset_00");
     }
-    if (decodedIRCommand.value == IRCODPRESET01)
+    if (decodedIRCommand.value == IR_PRESET01)
     {
       ini_block.newpreset = 1;
       dbgprint ("IR Command: preset_01");
     }
-    if (decodedIRCommand.value == IRCODPRESET02)
+    if (decodedIRCommand.value == IR_PRESET02)
     {
       ini_block.newpreset = 2;
       dbgprint ("IR Command: preset_02");
     }
-    if (decodedIRCommand.value == IRCODPRESET03)
+    if (decodedIRCommand.value == IR_PRESET03)
     {
       ini_block.newpreset = 3;
       dbgprint ("IR Command: preset_03");
     }
-    if (decodedIRCommand.value == IRCODPRESET04)
+    if (decodedIRCommand.value == IR_PRESET04)
     {
       ini_block.newpreset = 4;
       dbgprint ("IR Command: preset_04");
     }
-    if (decodedIRCommand.value == IRCODPRESET05)
+    if (decodedIRCommand.value == IR_PRESET05)
     {
       ini_block.newpreset = 5;
       dbgprint ("IR Command: preset_05");
     }
-    if (decodedIRCommand.value == IRCODPRESET06)
+    if (decodedIRCommand.value == IR_PRESET06)
     {
       ini_block.newpreset = 6;
       dbgprint ("IR Command: preset_06");
     }
-    if (decodedIRCommand.value == IRCODPRESET07)
+    if (decodedIRCommand.value == IR_PRESET07)
     {
       ini_block.newpreset = 7;
       dbgprint ("IR Command: preset_07");
     }
-    if (decodedIRCommand.value == IRCODPRESET08)
+    if (decodedIRCommand.value == IR_PRESET08)
     {
       ini_block.newpreset = 8;
       dbgprint ("IR Command: preset_08");
     }
-    if (decodedIRCommand.value == IRCODPRESET09)
+    if (decodedIRCommand.value == IR_PRESET09)
     {
       ini_block.newpreset = 9;
       dbgprint ("IR Command: preset_09");
@@ -2602,7 +2602,7 @@ void setup()
   dbgprint ( "Sketch size %d, free size %d",
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;
-#if defined ( USEIRRECV )
+#if defined ( USEIR )
   irrecv.enableIRIn();                                 // Enable IR receiver
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
