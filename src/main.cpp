@@ -5,7 +5,7 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 14 Sep 2021"
+#define VERSION "Tue, 13 Dec 2021"
 //
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
@@ -1044,7 +1044,7 @@ void displayvolume()
 //**************************************************************************************************
 void displaytime ( const char* str )
 {
-  const char* WDAYS [] = { "???", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" } ;
+  const char* WDAYS [] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" } ;
   char        datetxt[24] ;
   static char oldstr = '\0' ;                            // To check time difference
 
@@ -2015,7 +2015,7 @@ bool connectwifi()
     return false ;
   }
 
-  pfs = dbgprint ( "  IP = %d.%d.%d.%d  ",
+  pfs = dbgprint ( "IP = %d.%d.%d.%d",
                    WiFi.localIP()[0], 
                    WiFi.localIP()[1], 
                    WiFi.localIP()[2], 
@@ -2608,9 +2608,7 @@ void setup()
   vs1053player.begin() ;                               // Initialize VS1053 player
 #if defined ( USELCD )
   dsp_begin();
-  displayinfo ( VERSION, 0 ) ;
-  delay(3000);
-  displayinfo ( "      ESP-radio     ", 0 ) ;
+  displayinfo ( "      Esp-radio     ", 0 ) ;
   delay(10),
   displayinfo ( "      Starting      ", 2 ) ;
 #endif
@@ -2868,7 +2866,7 @@ void loop()
   if ( time_req )                                       // Time to refresh timetxt?
   {
     time_req = false ;                                  // Yes, clear request
-    if ( NetworkFound  )                                // Time available?
+    if ( NetworkFound )                                 // Time available?
     {
       displaytime ( timetxt ) ;                         // Write to TFT screen
       displayvolume() ;                                 // Show volume on display
