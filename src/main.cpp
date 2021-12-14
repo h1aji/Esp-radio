@@ -1,7 +1,7 @@
-//******************************************************************************************
-//*  Esp-radio - Webradio receiver for ESP8266, display and VS1053 MP3 module,             *
-//*              by Ed Smallenburg (ed@smallenburg.nl)                                     *
-//******************************************************************************************
+//************************************************************************************************
+//* Esp-radio - Webradio receiver for ESP8266, LCD2004 monochrome display and VS1053 MP3 module, *
+//*              by Ed Smallenburg (ed@smallenburg.nl)                                           *
+//************************************************************************************************
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
@@ -724,7 +724,8 @@ LCD2004* lcd = NULL ;
 
 bool dsp_begin()
 {
-  dbgprint ( "Init LCD2004, I2C pins %d,%d", SDA_PIN, SCL_PIN ) ;
+  dbgprint ( "Init LCD2004: I2C SDA, SCL pins %d, %d", SDA_PIN, SCL_PIN ) ;
+  
   if ( ( SDA_PIN >= 0 ) && ( SCL_PIN >= 0 ) )
   {
     lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;               // Create an instance for LCD
