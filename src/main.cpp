@@ -134,11 +134,17 @@ uint16_t IRRECV_PIN = 0;
 IRrecv irrecv ( IRRECV_PIN ) ;
 decode_results decodedIRCommand ;
 // IRremote button definitions
+#define IR_POWER      0xFFA25D
+#define IR_MODE       0xFF629D   // Mode
 #define IR_VOLDOWN    0xFFA857
 #define IR_VOLUP      0xFF906F
 #define IR_PREV       0xFF02FD
 #define IR_NEXT       0xFFC23D
 #define IR_MUTE       0xFFE21D
+#define IR_STOP       0xFFE01F   // EQ
+#define IR_PLAY       0xFF22DD   // Play/Pause
+#define IR_RPT        0xFF9867   // RPT
+#define IR_USD        0xFFB04F   // U/SD
 #define IR_PRESET00   0xFF6897
 #define IR_PRESET01   0xFF30CF
 #define IR_PRESET02   0xFF18E7
@@ -1762,6 +1768,16 @@ void timer100()
     {
       muteflag = !muteflag;
       dbgprint ("IR Command: mute");
+    }
+    if (decodedIRCommand.value == IR_PLAY)
+    {
+      analyzeCmd("resume");
+      dbgprint ("IR Command: resume");
+    }
+    if (decodedIRCommand.value == IR_STOP)
+    {
+      analyzeCmd("stop");
+      dbgprint ("IR Command: stop");
     }
     if (decodedIRCommand.value == IR_PRESET00)
     {
@@ -3579,7 +3595,6 @@ char* analyzeCmd ( const char* par, const char* val )
   {
     if ( datamode & ( HEADER | DATA | METADATA | PLAYLISTINIT |
                       PLAYLISTHEADER | PLAYLISTDATA ) )
-
     {
       datamode = STOPREQD ;                           // Request STOP
     }
