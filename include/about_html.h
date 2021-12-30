@@ -19,7 +19,7 @@ const char about_html[] PROGMEM = R"=====(
   <center>
    <h1>** ESP Radio **</h1>
   </center>
-	<p>Esp Radio -- Webradio receiver for ESP8266, 1.8" color display and VS1053 MP3 module.<br>
+	<p>Esp-radio - Webradio receiver for ESP8266, LCD2004 monochrome display and VS1053 MP3 module.<br>
 	This project is documented at <a target="blank" href="https://github.com/Edzelf/Esp-radio">Github</a>.</p>
 	<p>Author: Ed Smallenburg<br>
 	Webinterface design: <a target="blank" href="http://www.sanderjochems.nl/">Sander Jochems</a><br>

@@ -1,11 +1,11 @@
-//******************************************************************************************
-//*  Esp_radio -- Webradio receiver for ESP8266, display and VS1053 MP3 module,            *
-//*               by Ed Smallenburg (ed@smallenburg.nl)                                    *
-//******************************************************************************************
+//************************************************************************************************
+//* Esp-radio - Webradio receiver for ESP8266, LCD2004 monochrome display and VS1053 MP3 module, *
+//*              by Ed Smallenburg (ed@smallenburg.nl)                                           *
+//************************************************************************************************
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 14 Sep 2021"
+#define VERSION "Sun, 12 Dec 2021 12:10:00 GMT"
 //
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
@@ -19,22 +19,10 @@
 #include <TinyXML.h>
 #include <LittleFS.h>
 #include <time.h>
-//
-// Use SPIRAM as ringbuffer. false = do not use
-#define SPIRAM true
-#ifdef SPIRAM
-  #include <spiram.h>
-#endif
-//
-// Define USELCD if you are using LCD 20x4
-#define USELCD
-#if defined ( USELCD )
-  #include <Wire.h>
-#endif
 
 extern "C"
 {
-#include "user_interface.h"
+#include <user_interface.h>
 }
 
 // Definitions for 3 control switches on analog input
@@ -55,9 +43,51 @@ extern "C"
 #define VS1053_CS     15
 #define VS1053_DCS    16
 #define VS1053_DREQ   2
+//
+// Use SPIRAM as ringbuffer. false = do not use
+#define SPIRAM true
+#include <ESP8266Spiram.h>
+// SPI RAM settings
+// GPIO 1O CS pin
+#define SRAM_CS           10
+// 23LC1024 supports theorically up to 20MHz
+#define SRAM_FREQ         16e6
+// Total size SPI ram in bytes
+#define SRAM_SIZE         131072
+// Chunk size
+#define CHUNKSIZE         32
+// Total size SPI ram in chunks
+#define SRAM_CH_SIZE      4096
+// Delay (in bytes) before reading from SPIRAM
+#define SPIRAMDELAY       200000
+// Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
+#define RINGBFSIZ         20000
+// Debug buffer size
+#define DEBUG_BUFFER_SIZE 100
+// Name of the ini file
+#define INIFILENAME "/radio.ini"
+// Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
+// Not that the password of an AP must be at least as long as 8 characters.
+// Also used for other naming.
+#define NAME "Esp-radio"
+// Maximum number of MQTT reconnects before give-up
+#define MAXMQTTCONNECTS 20
+//
+// NTP settings
+// Default NZ time zone
+#define TZ         12
+// DST is +1 hour
+#define DST        1
+// Default server for NTP
+#define NTP_SERVER "pool.ntp.org"
+//
+// Define USELCD if you are using LCD 20x4
+#define USELCD
+#if defined ( USELCD )
+#include <Wire.h>
 // Pins for LCD 2004
-#define SDA_PIN 4
-#define SCL_PIN 5
+#define SDA_PIN     4
+#define SCL_PIN     5
 // Adjust for your display
 #define I2C_ADDRESS 0x27
 // Enable ACK for I2C communication
@@ -90,54 +120,41 @@ extern "C"
 #define dsp_setCursor(a,b)                                   // Position the cursor
 #define dsp_getwidth()                      20               // Get width of screen
 #define dsp_getheight()                     4                // Get height of screen
-//
-// Delay (in bytes) before reading from SPIRAM
-#define SPIRAMDELAY 200000
-// Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-#define RINGBFSIZ 20000
-// Debug buffer size
-#define DEBUG_BUFFER_SIZE 100
-// Name of the ini file
-#define INIFILENAME "/radio.ini"
-// Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
-// Not that the password of an AP must be at least as long as 8 characters.
-// Also used for other naming.
-#define NAME "Esp-radio"
-// Maximum number of MQTT reconnects before give-up
-#define MAXMQTTCONNECTS 20
-//
-// NTP settings
-#define TZ         12                                       // Default NZ time zone
-#define DST        1                                        // DST is +1 hour
-#define NTP_SERVER "pool.ntp.org"                           // Default server for NTP
+#endif
 //
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
-#define USEIRRECV
-#if defined ( USEIRRECV )
- // IR receiver pin, 0 for GPIO0
-uint16_t IRRECV_PIN = 0;
-// IRremote button definitions. Read out using Examples->IRremoteESP8266->IRrecvDemo.ino
-#define IRCODEVOLDOWN   0xFFA857
-#define IRCODEVOLUP     0xFF906F
-#define IRCODEPREV      0xFF02FD
-#define IRCODENEXT      0xFFC23D
-#define IRCODEMUTE      0xFFE21D
-#define IRCODPRESET00   0xFF6897
-#define IRCODPRESET01   0xFF30CF
-#define IRCODPRESET02   0xFF18E7
-#define IRCODPRESET03   0xFF7A85
-#define IRCODPRESET04   0xFF10EF
-#define IRCODPRESET05   0xFF38C7
-#define IRCODPRESET06   0xFF5AA5
-#define IRCODPRESET07   0xFF42BD
-#define IRCODPRESET08   0xFF4AB5
-#define IRCODPRESET09   0xFF52AD
+#define USEIR
+#if defined ( USEIR )
 #include <IRremoteESP8266.h>
 #include <IRrecv.h>
 #include <IRutils.h>
-IRrecv irrecv(IRRECV_PIN);
-decode_results decodedIRCommand;
+// IR receiver pin, 0 for GPIO 0
+uint16_t IRRECV_PIN = 0;
+IRrecv irrecv ( IRRECV_PIN ) ;
+decode_results decodedIRCommand ;
+// IRremote button definitions
+#define IR_POWER      0xFFA25D
+#define IR_MODE       0xFF629D   // Mode
+#define IR_VOLDOWN    0xFFA857
+#define IR_VOLUP      0xFF906F
+#define IR_PREV       0xFF02FD
+#define IR_NEXT       0xFFC23D
+#define IR_MUTE       0xFFE21D
+#define IR_STOP       0xFFE01F   // EQ
+#define IR_PLAY       0xFF22DD   // Play/Pause
+#define IR_RPT        0xFF9867   // RPT
+#define IR_USD        0xFFB04F   // U/SD
+#define IR_PRESET00   0xFF6897
+#define IR_PRESET01   0xFF30CF
+#define IR_PRESET02   0xFF18E7
+#define IR_PRESET03   0xFF7A85
+#define IR_PRESET04   0xFF10EF
+#define IR_PRESET05   0xFF38C7
+#define IR_PRESET06   0xFF5AA5
+#define IR_PRESET07   0xFF42BD
+#define IR_PRESET08   0xFF4AB5
+#define IR_PRESET09   0xFF52AD
 #endif
 
 
@@ -145,7 +162,6 @@ decode_results decodedIRCommand;
 //******************************************************************************************
 // Forward declaration of various functions                                                *
 //******************************************************************************************
-void   displaytime ( const char* str ) ;
 void   showstreamtitle ( const char* ml, bool full = false ) ;
 void   handlebyte ( uint8_t b, bool force = false ) ;
 void   handlebyte_ch ( uint8_t b, bool force = false ) ;
@@ -240,6 +256,9 @@ bool             localfile = false ;                       // Play from local mp
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
 bool             usespiram = SPIRAM ;                      // For check using SPIRAM at runtime
+uint16_t         chcount ;                                 // Number of chunks currently in buffer
+uint32_t         readinx ;                                 // Read index
+uint32_t         writeinx ;                                // write index
 uint8_t          prcwinx ;                                 // Index in pwchunk (see putring)
 uint8_t          prcrinx ;                                 // Index in prchunk (see getring)
 int32_t          spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
@@ -270,11 +289,11 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 //******************************************************************************************
 // Pages and CSS for the webinterface.                                                     *
 //******************************************************************************************
-#include <about_html.h>
-#include <config_html.h>
-#include <index_html.h>
-#include <radio_css.h>
-#include <favicon_ico.h>
+#include "about_html.h"
+#include "config_html.h"
+#include "index_html.h"
+#include "radio_css.h"
+#include "favicon_ico.h"
 
 //
 //******************************************************************************************
@@ -711,7 +730,8 @@ LCD2004* lcd = NULL ;
 
 bool dsp_begin()
 {
-  dbgprint ( "Init LCD2004, I2C pins %d,%d", SDA_PIN, SCL_PIN ) ;
+  dbgprint ( "Init LCD2004: I2C SDA, SCL pins %d, %d", SDA_PIN, SCL_PIN ) ;
+  
   if ( ( SDA_PIN >= 0 ) && ( SCL_PIN >= 0 ) )
   {
     lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;               // Create an instance for LCD
@@ -1030,7 +1050,7 @@ void displayvolume()
 //**************************************************************************************************
 void displaytime ( const char* str )
 {
-  const char* WDAYS [] = { "???", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" } ;
+  const char* WDAYS [] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" } ;
   char        datetxt[24] ;
   static char oldstr = '\0' ;                            // To check time difference
 
@@ -1130,7 +1150,8 @@ void displayinfo ( const char *str, int pos )
   dsp_update_line ( pos ) ;                     // Show on display
 }
 #else
-#define displayinfo(a,b,c)                      // Empty declaration
+#define displayinfo(a,b)                        // Empty declaration
+#define displaytime(a)
 #endif
 
 
@@ -1195,6 +1216,96 @@ void gettime()
       dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
     }
   }
+}
+
+
+//******************************************************************************************
+// SPI RAM routines.                                                                       *
+//******************************************************************************************
+// Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
+//******************************************************************************************
+
+ESP8266Spiram spiram ( SRAM_CS, SRAM_FREQ ) ;
+
+//******************************************************************************************
+//                              S P A C E A V A I L A B L E                                *
+//******************************************************************************************
+// Returns true if bufferspace is available.                                               *
+//******************************************************************************************
+bool spaceAvailable()
+{
+  return ( chcount < SRAM_CH_SIZE ) ;
+}
+
+
+//******************************************************************************************
+//                              D A T A A V A I L A B L E                                  *
+//******************************************************************************************
+// Returns the number of full chunks available in the buffer.                              *
+//******************************************************************************************
+uint16_t dataAvailable()
+{
+  return chcount ;
+}
+
+
+//******************************************************************************************
+//                    G E T F R E E B U F F E R S P A C E                                  *
+//******************************************************************************************
+// Return the free buffer space in chunks.                                                 *
+//******************************************************************************************
+uint16_t getFreeBufferSpace()
+{
+  return ( SRAM_CH_SIZE - chcount ) ;                // Return number of chuinks available
+}
+
+
+//******************************************************************************************
+//                             B U F F E R W R I T E                                       *
+//******************************************************************************************
+// Write one chunk (32 bytes) to SPI RAM.                                                  *
+// No check on available space.  See spaceAvailable().                                     *
+//******************************************************************************************
+void bufferWrite ( uint8_t *b )
+{
+  spiram.write ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ; // Put byte in SRAM
+  writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
+  chcount++ ;                                           // Count number of chunks
+}
+
+
+//******************************************************************************************
+//                             B U F F E R R E A D                                         *
+//******************************************************************************************
+// Read one chunk in the user buffer.                                                      *
+// Assume there is always something in the bufferpace.  See dataAvailable()                *
+//******************************************************************************************
+void bufferRead ( uint8_t *b )
+{
+  spiram.read ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // return next chunk
+  readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
+  chcount-- ;                                          // Count is now one less
+}
+
+
+//******************************************************************************************
+//                            B U F F E R R E S E T                                        *
+//******************************************************************************************
+void bufferReset()
+{
+  readinx = 0 ;                                     // Reset ringbuffer administration
+  writeinx = 0 ;
+  chcount = 0 ;
+}
+
+
+//******************************************************************************************
+//                                S P I R A M S E T U P                                    *
+//******************************************************************************************
+void spiramSetup()
+{
+  spiram.begin() ;                                  // Init ESP8266Spiram
+  bufferReset() ;                                   // Reset ringbuffer administration
 }
 
 
@@ -1623,18 +1734,18 @@ void timer100()
     }
   }
 // Check for and execute new IR remote control commands
-#if defined(USEIRRECV)
+#if defined ( USEIR )
   if (irrecv.decode(&decodedIRCommand))
   {
     dbgprint ("IR Command received");
     oldvol = vs1053player.getVolume();
-    if (decodedIRCommand.value == IRCODEVOLDOWN)
+    if (decodedIRCommand.value == IR_VOLDOWN)
     {
       oldvol = vs1053player.getVolume();
       ini_block.reqvol = oldvol - 2;
       dbgprint ("Volume now is %d", ini_block.reqvol);
     }
-    if (decodedIRCommand.value == IRCODEVOLUP)
+    if (decodedIRCommand.value == IR_VOLUP)
     {
       oldvol = vs1053player.getVolume();
       ini_block.reqvol = oldvol + 2;
@@ -1643,67 +1754,77 @@ void timer100()
     if (ini_block.reqvol < 0) ini_block.reqvol = 0;
     if (ini_block.reqvol > 100) ini_block.reqvol = 100;
 
-    if (decodedIRCommand.value == IRCODEPREV)
+    if (decodedIRCommand.value == IR_PREV)
     {
       ini_block.newpreset = currentpreset - 1;
       dbgprint ("IR Command: previous station");
     }
-    if (decodedIRCommand.value == IRCODENEXT)
+    if (decodedIRCommand.value == IR_NEXT)
     {
       ini_block.newpreset = currentpreset + 1;
       dbgprint ("IR Command: next radio station");
     }
-    if (decodedIRCommand.value == IRCODEMUTE)
+    if (decodedIRCommand.value == IR_MUTE)
     {
       muteflag = !muteflag;
       dbgprint ("IR Command: mute");
     }
-    if (decodedIRCommand.value == IRCODPRESET00)
+    if (decodedIRCommand.value == IR_PLAY)
+    {
+      analyzeCmd("resume");
+      dbgprint ("IR Command: resume");
+    }
+    if (decodedIRCommand.value == IR_STOP)
+    {
+      analyzeCmd("stop");
+      dbgprint ("IR Command: stop");
+    }
+    if (decodedIRCommand.value == IR_PRESET00)
     {
       ini_block.newpreset = 0;
       dbgprint ("IR Command: preset_00");
     }
-    if (decodedIRCommand.value == IRCODPRESET01)
+    if (decodedIRCommand.value == IR_PRESET01)
     {
       ini_block.newpreset = 1;
       dbgprint ("IR Command: preset_01");
     }
-    if (decodedIRCommand.value == IRCODPRESET02)
+    if (decodedIRCommand.value == IR_PRESET02)
     {
       ini_block.newpreset = 2;
       dbgprint ("IR Command: preset_02");
     }
-    if (decodedIRCommand.value == IRCODPRESET03)
+    if (decodedIRCommand.value == IR_PRESET03)
     {
       ini_block.newpreset = 3;
       dbgprint ("IR Command: preset_03");
     }
-    if (decodedIRCommand.value == IRCODPRESET04)
+    if (decodedIRCommand.value == IR_PRESET04)
     {
       ini_block.newpreset = 4;
       dbgprint ("IR Command: preset_04");
     }
-    if (decodedIRCommand.value == IRCODPRESET05)
+    if (decodedIRCommand.value == IR_PRESET05)
     {
       ini_block.newpreset = 5;
       dbgprint ("IR Command: preset_05");
     }
-    if (decodedIRCommand.value == IRCODPRESET06)
+    if (decodedIRCommand.value == IR_PRESET06)
     {
       ini_block.newpreset = 6;
       dbgprint ("IR Command: preset_06");
     }
-    if (decodedIRCommand.value == IRCODPRESET07)
+    if (decodedIRCommand.value == IR_PRESET07)
     {
       ini_block.newpreset = 7;
       dbgprint ("IR Command: preset_07");
     }
-    if (decodedIRCommand.value == IRCODPRESET08)
+    if (decodedIRCommand.value == IR_PRESET08)
     {
       ini_block.newpreset = 8;
       dbgprint ("IR Command: preset_08");
     }
-    if (decodedIRCommand.value == IRCODPRESET09)
+    if (decodedIRCommand.value == IR_PRESET09)
     {
       ini_block.newpreset = 9;
       dbgprint ("IR Command: preset_09");
@@ -1900,18 +2021,23 @@ bool connectwifi()
   WiFi.begin ( ini_block.ssid.c_str(),
                ini_block.passwd.c_str() ) ;            // Connect to selected SSID
   dbgprint ( "Try WiFi %s", ini_block.ssid.c_str() ) ; // Message to show during WiFi connect
+
   if (  WiFi.waitForConnectResult() != WL_CONNECTED )  // Try to connect
   {
     dbgprint ( "WiFi Failed!  Trying to setup AP with name %s and password %s.", NAME, NAME ) ;
     WiFi.softAP ( NAME, NAME ) ;                       // This ESP will be an AP
     delay ( 5000 ) ;
-    pfs = dbgprint ( "IP = 192.168.4.1" ) ;            // Address if AP
+    pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Address if AP
     displayinfo ( " AP mode activated ", 2 ) ;
     return false ;
   }
+
   pfs = dbgprint ( "IP = %d.%d.%d.%d",
-                   WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] ) ;
-  displayinfo ( pfs, 1 ) ;                             // Show IP address
+                   WiFi.localIP()[0], 
+                   WiFi.localIP()[1], 
+                   WiFi.localIP()[2], 
+                   WiFi.localIP()[3] ) ;
+  displayinfo ( pfs, 3 ) ;                             // Show IP address
   return true ;
 }
 
@@ -2493,15 +2619,13 @@ void setup()
   dbgprint ( "Sketch size %d, free size %d",
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;
-#if defined ( USEIRRECV )
+#if defined ( USEIR )
   irrecv.enableIRIn();                                 // Enable IR receiver
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
 #if defined ( USELCD )
   dsp_begin();
-  displayinfo ( VERSION, 0 ) ;
-  delay(3000);
-  displayinfo ( "      ESP-radio     ", 0 ) ;
+  displayinfo ( "      Esp-radio     ", 0 ) ;
   delay(10),
   displayinfo ( "      Starting      ", 2 ) ;
 #endif
@@ -2759,7 +2883,7 @@ void loop()
   if ( time_req )                                       // Time to refresh timetxt?
   {
     time_req = false ;                                  // Yes, clear request
-    if ( NetworkFound  )                                // Time available?
+    if ( NetworkFound )                                 // Time available?
     {
       displaytime ( timetxt ) ;                         // Write to TFT screen
       displayvolume() ;                                 // Show volume on display
@@ -3471,7 +3595,6 @@ char* analyzeCmd ( const char* par, const char* val )
   {
     if ( datamode & ( HEADER | DATA | METADATA | PLAYLISTINIT |
                       PLAYLISTHEADER | PLAYLISTDATA ) )
-
     {
       datamode = STOPREQD ;                           // Request STOP
     }
@@ -3539,8 +3662,8 @@ char* analyzeCmd ( const char* par, const char* val )
     {
       rcount = dataAvailable() ;                      // Yes, get free space
     }
-    sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d",
-              system_get_free_heap_size(), rcount, mp3client->available() ) ;
+    sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
+              system_get_free_heap_size(), rcount, mp3client->available(), bitrate ) ;
   }
   // Commands for bass/treble control
   else if ( argument.startsWith ( "tone" ) )          // Tone command

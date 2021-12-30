@@ -1,9 +1,11 @@
 # Esp-radio
-Internet radio based on Esp8266 and VS1053.
-This fork is optimised for Platformio and replaced ILI9163C display with LCD 2004
+Internet radio based on ESP8266 and VS1053.  
+This fork is optimised for Platformio and replaced ILI9163C display with LCD2004
 
 ### NOTES:
 - The radio will NOT play AACP streams.
+- Connection between LCD2004 and ESP8266 goes through level shifter,
+  which is not demonstrated on wiring diagram
 
 ### Features:
 - Can connect to thousands of Internet radio stations that broadcast MP3 or OGG audio streams.
@@ -39,13 +41,13 @@ This fork is optimised for Platformio and replaced ILI9163C display with LCD 200
 |  GPIO04   |          |            |            |    SDA    |
 |  GPIO05   |          |            |            |    SCL    |
 |  GPIO00   |          |            |    OUT     |           |
-|  GPIO14   |   SCK    |  SCK       |            |           |
+|  GPIO14   |   SCK    |    SCK     |            |           |
 |  GPIO12   |   MISO   |  SO/SIO1   |            |           |
 |  GPIO13   |   MOSI   |  SI/SIO0   |            |           |
 |  GPIO16   |   DCS    |            |            |           |
 |  GPIO02   |   DREQ   |            |            |           |
 |  GPIO15   |   CS     |            |            |           |
-|  GPIO10   |          |   CS       |            |           |
+|  GPIO10   |          |     CS     |            |           |
 
 
 ### Schematic
