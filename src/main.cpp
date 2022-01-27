@@ -20,6 +20,8 @@
 #include <LittleFS.h>
 #include <time.h>
 
+#include "vs1053b-patches.h"
+
 extern "C"
 {
 #include <user_interface.h>
@@ -31,9 +33,6 @@ extern "C"
 // Switches are programmed as "Goto station 1", "Next station" and "Previous station" respectively.
 // Set these values to 2000 if not used or tie analog input to ground.
 #define NUMANA  3
-//#define asw1    252
-//#define asw2    334
-//#define asw3    499
 #define asw1    2000
 #define asw2    2000
 #define asw3    2000
@@ -311,6 +310,7 @@ class VS1053
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
     const uint8_t SCI_MODE          = 0x0 ;
+    const uint8_t SCI_STATUS        = 0x1 ;
     const uint8_t SCI_BASS          = 0x2 ;
     const uint8_t SCI_CLOCKF        = 0x3 ;
     const uint8_t SCI_AUDATA        = 0x5 ;
@@ -395,7 +395,13 @@ class VS1053
     {
       return ( digitalRead ( dreq_pin ) == HIGH ) ;
     }
-    void     AdjustRate ( long ppm2 ) ;                  // Fine tune the datarate
+    void     adjustRate ( long ppm2 ) ;                  // Fine tune the datarate
+    void     switchToMp3Mode();
+    uint16_t getChipVersion();                           // Gets version of the VLSI chip being used
+
+    void loadUserCode ( const unsigned short* plugin, unsigned short plugin_size ) ;
+    void loadDefaultVs1053Patches();                     // Loads the latest generic firmware patch.
+
 } ;
 
 //******************************************************************************************
@@ -583,7 +589,7 @@ void VS1053::setVolume ( uint8_t vol )
   if ( vol != curvol )
   {
     curvol = vol ;                                      // Save for later use
-    value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
+    value = map ( vol, 0, 100, 0xFE, 0x00 ) ;           // 0..100% to one channel
     value = ( value << 8 ) | value ;
     write_register ( SCI_VOL, value ) ;                 // Volume left and right
   }
@@ -668,7 +674,7 @@ void VS1053::printDetails ( const char *header )
   }
 }
 
-void VS1053::AdjustRate ( long ppm2 )
+void VS1053::adjustRate ( long ppm2 )
 {
   write_register ( SCI_WRAMADDR, 0x1e07 ) ;
   write_register ( SCI_WRAM,     ppm2 ) ;
@@ -680,6 +686,55 @@ void VS1053::AdjustRate ( long ppm2 )
   write_register ( SCI_AUDATA,   read_register ( SCI_AUDATA ) ) ;
 }
 
+void VS1053::switchToMp3Mode()
+{
+    wram_write ( 0xC017, 3 ) ; // GPIO DDR = 3
+    wram_write ( 0xC019, 0 ) ; // GPIO ODATA = 0
+    delay ( 100 ) ;
+    softReset();
+}
+
+uint16_t VS1053::getChipVersion()
+{
+    uint16_t status = read_register ( SCI_STATUS ) ;
+    return ( (status & 0x00F0) >> 4);
+}
+
+void VS1053::loadUserCode ( const unsigned short* plugin, unsigned short plugin_size )
+{
+    int i = 0;
+    while (i<plugin_size)
+    {
+        unsigned short addr, n, val;
+        addr = plugin[i++];
+        n = plugin[i++];
+        if (n & 0x8000U)
+        {
+            n &= 0x7FFF;
+            val = plugin[i++];
+            while (n--)
+            {
+                write_register ( addr, val ) ;
+            }
+        }
+        else
+        {
+            while (n--)
+            {
+                val = plugin[i++];
+                write_register ( addr, val ) ;
+            }
+        }
+    }
+}
+
+/**
+ * Load the latest generic firmware patch
+ */
+void VS1053::loadDefaultVs1053Patches()
+{
+   loadUserCode ( PATCHES, PATCHES_SIZE ) ;
+};
 
 // The object for the MP3 player
 VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
@@ -1845,7 +1900,7 @@ void showstreamtitle ( const char *ml, bool full )
 {
   char*             p1 ;
   char*             p2 ;
-  char              streamtitle[150] ;           // Streamtitle from metadata
+  char              streamtitle[150] ;          // Streamtitle from metadata
 
   if ( strstr ( ml, "StreamTitle=" ) )
   {
@@ -1972,6 +2027,7 @@ bool connecttohost()
                       String ( "Host: " ) +
                       hostwoext +
                       String ( "\r\n" ) +
+                      String ( "User-Agent: Esp-radio\r\n" ) +
                       String ( "Icy-MetaData:1\r\n" ) +
                       String ( "Connection: close\r\n\r\n" ) ) ;
     return true ;
@@ -2622,7 +2678,11 @@ void setup()
 #if defined ( USEIR )
   irrecv.enableIRIn();                                 // Enable IR receiver
 #endif
-  vs1053player.begin() ;                               // Initialize VS1053 player
+vs1053player.begin() ;                                 // Initialize VS1053 player
+if ( vs1053player.getChipVersion() == 4 )
+{ 
+  vs1053player.loadDefaultVs1053Patches();             // Only perform an update if we really are using a VS1053
+}
 #if defined ( USELCD )
   dsp_begin();
   displayinfo ( "      Esp-radio     ", 0 ) ;
@@ -3143,6 +3203,7 @@ void handlebyte ( uint8_t b, bool force )
         datamode = DATA ;                              // Expecting data now
         datacount = metaint ;                          // Number of bytes before first metadata
         bufcnt = 0 ;                                   // Reset buffer count
+        vs1053player.switchToMp3Mode() ;
         vs1053player.startSong() ;                     // Start a new song
       }
     }
@@ -3690,7 +3751,7 @@ char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "rate" )                      // Rate command?
   {
-    vs1053player.AdjustRate ( ivalue ) ;              // Yes, adjust
+    vs1053player.adjustRate ( ivalue ) ;              // Yes, adjust
   }
   else if ( argument.startsWith ( "mqtt" ) )          // Parameter fo MQTT?
   {
