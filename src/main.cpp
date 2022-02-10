@@ -5,7 +5,7 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sun, 12 Dec 2021 12:10:00 GMT"
+#define VERSION "Sun, 11 Feb 2022 12:10:00 GMT"
 //
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
@@ -24,7 +24,7 @@
 
 extern "C"
 {
-#include <user_interface.h>
+  #include <user_interface.h>
 }
 
 // Definitions for 3 control switches on analog input
@@ -60,7 +60,7 @@ extern "C"
 // Delay (in bytes) before reading from SPIRAM
 #define SPIRAMDELAY       200000
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-#define RINGBFSIZ         20000
+#define RINGBFSIZ         16000
 // Debug buffer size
 #define DEBUG_BUFFER_SIZE 100
 // Name of the ini file
@@ -177,7 +177,8 @@ void   publishIP() ;
 String xmlparse ( String mount ) ;
 bool   connecttohost() ;
 void   gettime() ;
-
+void   XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
+                    char* data,  uint16_t dataLen ) ;
 
 //
 //******************************************************************************************
@@ -1824,6 +1825,11 @@ void timer100()
       muteflag = !muteflag;
       dbgprint ("IR Command: mute");
     }
+    if (decodedIRCommand.value == IR_POWER)
+    {
+      analyzeCmd("reset");
+      dbgprint ("IR Command: reset");
+    }
     if (decodedIRCommand.value == IR_PLAY)
     {
       analyzeCmd("resume");
@@ -2077,6 +2083,8 @@ bool connectwifi()
   WiFi.begin ( ini_block.ssid.c_str(),
                ini_block.passwd.c_str() ) ;            // Connect to selected SSID
   dbgprint ( "Try WiFi %s", ini_block.ssid.c_str() ) ; // Message to show during WiFi connect
+
+  //wifi_fpm_auto_sleep_set_in_null_mode ( NULL_MODE ) ; // Disable auto sleep mode
 
   if (  WiFi.waitForConnectResult() != WL_CONNECTED )  // Try to connect
   {
@@ -3093,12 +3101,14 @@ void handlebyte ( uint8_t b, bool force )
   String           lcml ;                              // Lower case metaline
   String           ct ;                                // Contents type
   static bool      ctseen = false ;                    // First line of header seen or not
+  static bool      redirection = false ;               // Redirection or not
   int              inx ;                               // Pointer in metaline
   int              i ;                                 // Loop control
 
   if ( datamode == INIT )                              // Initialize for header receive
   {
     ctseen = false ;                                   // Contents type not seen yet
+    redirection = false ;                              // No redirect yet
     metaint = 0 ;                                      // No metaint found
     LFcount = 0 ;                                      // For detection end of header
     bitrate = 0 ;                                      // Bitrate still unknown
@@ -3159,6 +3169,19 @@ void handlebyte ( uint8_t b, bool force )
         lcml = metaline ;                              // Use lower case for compare
         lcml.toLowerCase() ;
         dbgprint ( metaline.c_str() ) ;                // Yes, Show it
+        if ( lcml.startsWith ( "location: " ) )        // Redirection?
+        {
+          redirection = true ;
+          if ( lcml.indexOf ( "http://" ) > 8 )        // Redirection with http://?
+          {
+            host = metaline.substring ( 17 ) ;         // Yes, get new URL
+          }
+          else if ( lcml.indexOf ( "https://" ) )      // Redirection with ttps://?
+          {
+            host = metaline.substring ( 18 ) ;         // Yes, get new URL
+          }
+          hostreq = true ;
+        }
         if ( lcml.indexOf ( "content-type" ) >= 0 )    // Line with "Content-Type: xxxx/yyy"
         {
           ctseen = true ;                              // Yes, remember seeing this
@@ -3195,16 +3218,28 @@ void handlebyte ( uint8_t b, bool force )
         }
       }
       metaline = "" ;                                  // Reset this line
-      if ( ( LFcount == 2 ) && ctseen )                // Some data seen and a double LF?
+      if ( LFcount == 2 )                              // Double linfeed ends header
       {
-        dbgprint ( "Switch to DATA, bitrate is %d"     // Show bitrate
-                   ", metaint is %d",                  // and metaint
-                   bitrate, metaint ) ;
-        datamode = DATA ;                              // Expecting data now
-        datacount = metaint ;                          // Number of bytes before first metadata
         bufcnt = 0 ;                                   // Reset buffer count
-        vs1053player.switchToMp3Mode() ;
-        vs1053player.startSong() ;                     // Start a new song
+        if ( ctseen )                                  // Some data seen and a double LF?
+        {
+          dbgprint ( "Switch to DATA, bitrate is %d"   // Show bitrate
+                      ", metaint is %d",               // and metaint
+                    bitrate, metaint ) ;
+          datamode = DATA ;                            // Expecting data now
+          spiramdelay = SPIRAMDELAY ;                  // Start delay
+
+          //emptyring() ;                              // Empty SPIRAM buffer (not sure about this)
+
+          datacount = metaint ;                        // Number of bytes before first metadata
+          bufcnt = 0 ;                                 // Reset buffer count
+          vs1053player.switchToMp3Mode() ;
+          vs1053player.startSong() ;                   // Start a new song
+        }
+        if ( redirection )                             // Redirect seen?
+        {
+           datamode = INIT ;
+        }
       }
     }
     else
