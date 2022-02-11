@@ -1461,11 +1461,14 @@ uint8_t getring()
 //******************************************************************************************
 void emptyring()
 {
-  rbwindex = 0 ;                          // Reset ringbuffer administration
-  rbrindex = RINGBFSIZ - 1 ;
-  rcount = 0 ;
-  prcwinx = 0 ;
-  prcrinx = 32 ;                          // Set buffer to empty
+  #ifdef SPIRAM
+    prcwinx = 0 ;
+    prcrinx = 32 ;                        // Set buffer to empty
+  #else
+    rbwindex = 0 ;                        // Reset ringbuffer administration
+    rbrindex = RINGBFSIZ - 1 ;
+    rcount = 0 ;
+  #endif
 }
 
 
@@ -1724,16 +1727,19 @@ void testfile ( String fspec )
 void timer100()
 {
   static int     count10sec = 0 ;                 // Counter for activate 10 seconds process
-  static int     count1sec = 0 ;                  // Counter for 1 second
   uint16_t       v ;                              // Analog input value 0..1023
   static uint8_t aoldval = 0 ;                    // Previous value of analog input switch
   uint8_t        anewval ;                        // New value of analog input switch (0..3)
   uint8_t        oldvol ;
 
-  if ( ++count1sec == 10  )                       // 1 second passed?
+  if ( ++count10sec == 100  )                     // 10 seconds passed?
+  {
+    timer10sec() ;                                // Yes, do 10 second procedure
+    count10sec = 0 ;                              // Reset count
+  }
+  if ( ( count10sec % 10 ) == 0 )                 // 1 second passed?
   {
     scrollflag = true ;                           // Yes, request scroll of LCD
-    count1sec = 0 ;                               // Reset count
     if ( ++timeinfo.tm_sec >= 60 )                // Yes, update number of seconds
     {
       timeinfo.tm_sec = 0 ;                       // Wrap after 60 seconds
@@ -1747,12 +1753,6 @@ void timer100()
       }
     }
     time_req = true ;                             // Yes, show current time request
-  }
-
-  if ( ++count10sec == 100  )                     // 10 seconds passed?
-  {
-    timer10sec() ;                                // Yes, do 10 second procedure
-    count10sec = 0 ;                              // Reset count
   }
   else
   {
@@ -2948,8 +2948,8 @@ void loop()
   }
   if ( scrollflag )                                     // Time to scroll?
   {
-    scrollflag = false ;                                // Yes, reset flag
     dsp_update() ;                                      // LCD scroll
+    scrollflag = false ;                                // Yes, reset flag
   }
   #endif
   scanserial() ;                                        // Handle serial input
