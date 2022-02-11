@@ -43,10 +43,11 @@ extern "C"
 #define VS1053_DCS    16
 #define VS1053_DREQ   2
 //
-// Use SPIRAM as ringbuffer. false = do not use
-#define SPIRAM true
-#include <ESP8266Spiram.h>
+// Use SPIRAM as ringbuffer
+//#define SPIRAM
+#if defined ( SPIRAM )
 // SPI RAM settings
+#include <ESP8266Spiram.h>
 // GPIO 1O CS pin
 #define SRAM_CS           10
 // 23LC1024 supports theorically up to 20MHz
@@ -59,8 +60,10 @@ extern "C"
 #define SRAM_CH_SIZE      4096
 // Delay (in bytes) before reading from SPIRAM
 #define SPIRAMDELAY       200000
+#endif
+//
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-#define RINGBFSIZ         16000
+#define RINGBFSIZ         20000
 // Debug buffer size
 #define DEBUG_BUFFER_SIZE 100
 // Name of the ini file
@@ -70,7 +73,7 @@ extern "C"
 // Also used for other naming.
 #define NAME "Esp-radio"
 // Maximum number of MQTT reconnects before give-up
-#define MAXMQTTCONNECTS 20
+#define MAXMQTTCONNECTS   20
 //
 // NTP settings
 // Default NZ time zone
@@ -80,9 +83,9 @@ extern "C"
 // Default server for NTP
 #define NTP_SERVER "pool.ntp.org"
 //
-// Define USELCD if you are using LCD 20x4
-#define USELCD
-#if defined ( USELCD )
+// Define LCD if you are using LCD 2004
+#define LCD
+#if defined ( LCD )
 #include <Wire.h>
 // Pins for LCD 2004
 #define SDA_PIN     4
@@ -123,8 +126,8 @@ extern "C"
 //
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
-#define USEIR
-#if defined ( USEIR )
+#define IR
+#if defined ( IR )
 #include <IRremoteESP8266.h>
 #include <IRrecv.h>
 #include <IRutils.h>
@@ -255,13 +258,14 @@ File             mp3file ;                                 // File containing mp
 bool             localfile = false ;                       // Play from local mp3-file or not
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
-bool             usespiram = SPIRAM ;                      // For check using SPIRAM at runtime
 uint16_t         chcount ;                                 // Number of chunks currently in buffer
 uint32_t         readinx ;                                 // Read index
 uint32_t         writeinx ;                                // write index
 uint8_t          prcwinx ;                                 // Index in pwchunk (see putring)
 uint8_t          prcrinx ;                                 // Index in prchunk (see getring)
-int32_t          spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
+#if defined ( SPIRAM )
+  int32_t        spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
+#endif
 bool             scrollflag = false ;                      // Request to scroll LCD
 struct tm        timeinfo ;                                // Will be filled by NTP server
 char             timetxt[9] ;                              // Converted timeinfo
@@ -741,7 +745,7 @@ void VS1053::loadDefaultVs1053Patches()
 VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 
 
-#if defined ( USELCD )
+#if defined ( LCD )
 //***************************************************************************************************
 //*  LCD2004.h -- Driver for LCD 2004 display with I2C backpack.                                    *
 //***************************************************************************************************
@@ -1235,46 +1239,51 @@ bool getLocalTime(struct tm * info, uint32_t ms)
 
 void gettime()
 {
-  static int16_t delaycount = 0 ;                         // To reduce number of NTP requests
+  static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
 
-  if ( timeinfo.tm_year )                                 // Legal time found?
+  #if defined ( LCD )
   {
-    sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
-              timeinfo.tm_hour,
-              timeinfo.tm_min,
-              timeinfo.tm_sec ) ;
-  }
-  if ( --delaycount <= 0 )                                // Sync every few hours
-  {
-    delaycount = 7200 ;                                   // Reset counter
-    if ( timeinfo.tm_year )                               // Legal time found?
+    if ( timeinfo.tm_year )                                 // Legal time found?
     {
-      dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
-    }
-    dbgprint ( "Sync TOD" ) ;
-    if ( !getLocalTime ( &timeinfo, 5000 ) )              // Read from NTP server
-    {
-      dbgprint ( "Failed to obtain time!" ) ;             // Error
-      timeinfo.tm_year = 0 ;                              // Set current time to illegal
-      if ( retrycount )                                   // Give up syncing?
-      {
-        retrycount-- ;                                    // No try again
-        delaycount = 5 ;                                  // Retry after 5 seconds
-      }
-    }
-    else
-    {
-      sprintf ( timetxt, "%02d:%02d:%02d",                // Format new time to a string
+      sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
                 timeinfo.tm_hour,
                 timeinfo.tm_min,
                 timeinfo.tm_sec ) ;
-      dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
+    }
+    if ( --delaycount <= 0 )                                // Sync every few hours
+    {
+      delaycount = 7200 ;                                   // Reset counter
+      if ( timeinfo.tm_year )                               // Legal time found?
+      {
+        dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
+      }
+      dbgprint ( "Sync TOD" ) ;
+      if ( !getLocalTime ( &timeinfo, 5000 ) )              // Read from NTP server
+      {
+        dbgprint ( "Failed to obtain time!" ) ;             // Error
+        timeinfo.tm_year = 0 ;                              // Set current time to illegal
+        if ( retrycount )                                   // Give up syncing?
+        {
+          retrycount-- ;                                    // No try again
+          delaycount = 5 ;                                  // Retry after 5 seconds
+        }
+      }
+      else
+      {
+        sprintf ( timetxt, "%02d:%02d:%02d",                // Format new time to a string
+                  timeinfo.tm_hour,
+                  timeinfo.tm_min,
+                  timeinfo.tm_sec ) ;
+        dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
+      }
     }
   }
+  #endif
 }
 
 
+#if defined ( SPIRAM )
 //******************************************************************************************
 // SPI RAM routines.                                                                       *
 //******************************************************************************************
@@ -1363,6 +1372,7 @@ void spiramSetup()
   spiram.begin() ;                                  // Init ESP8266Spiram
   bufferReset() ;                                   // Reset ringbuffer administration
 }
+#endif
 
 
 //******************************************************************************************
@@ -1373,14 +1383,11 @@ void spiramSetup()
 //******************************************************************************************
 inline bool ringspace()
 {
-  if ( usespiram )
-  {
+  #if defined ( SPIRAM )
     return spaceAvailable() ;         // True if at least 1 chunk available
-  }
-  else
-  {
+  #else
     return ( rcount < RINGBFSIZ ) ;   // True is at least one byte of free space is available
-  }
+  #endif
 }
 
 
@@ -1389,14 +1396,11 @@ inline bool ringspace()
 //******************************************************************************************
 inline uint16_t ringavail()
 {
-  if ( usespiram )
-  {
+  #if defined ( SPIRAM )
     return dataAvailable() ;          // Return number of chunks filled
-  }
-  else
-  {
+  #else
     return rcount ;                   // Return number of bytes available
-  }
+  #endif
 }
 
 
@@ -1407,26 +1411,22 @@ inline uint16_t ringavail()
 //******************************************************************************************
 void putring ( uint8_t b )              // Put one byte in the ringbuffer
 {
-  static uint8_t pwchunk[32] ;          // Buffer for one chunk
-
-  if ( usespiram )
-  {
+  #if defined ( SPIRAM )
+    static uint8_t pwchunk[32] ;        // Buffer for one chunk
     pwchunk[prcwinx++] = b ;            // Store in local chunk
     if ( prcwinx == sizeof(pwchunk) )   // Chunk full?
     {
       bufferWrite ( pwchunk ) ;         // Yes, store in SPI RAM
       prcwinx = 0 ;                     // Index to begin of chunk
     }
-  }
-  else
-  {
+  #else
     *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
     if ( ++rbwindex == RINGBFSIZ )      // Increment pointer and
     {
       rbwindex = 0 ;                    // wrap at end
     }
     rcount++ ;                          // Count number of bytes in the
-  }
+  #endif
 }
 
 
@@ -1437,26 +1437,22 @@ void putring ( uint8_t b )              // Put one byte in the ringbuffer
 //******************************************************************************************
 uint8_t getring()
 {
-  static uint8_t prchunk[32] ;          // Buffer for one chunk
-
-  if ( usespiram )
-  {
-    if ( prcrinx >= sizeof(prchunk) )   // End of buffer reached?
+  #if defined ( SPIRAM )
+    static uint8_t prchunk[32] ;          // Buffer for one chunk
+    if ( prcrinx >= sizeof(prchunk) )     // End of buffer reached?
     {
-      prcrinx = 0 ;                     // Yes, reset index to begin of buffer
-      bufferRead ( prchunk ) ;          // And read new buffer
+      prcrinx = 0 ;                       // Yes, reset index to begin of buffer
+      bufferRead ( prchunk ) ;            // And read new buffer
     }
     return ( prchunk[prcrinx++] ) ;
-  }
-  else
-  {
-    if ( ++rbrindex == RINGBFSIZ )      // Increment pointer and
+  #else
+    if ( ++rbrindex == RINGBFSIZ )        // Increment pointer and
     {
-      rbrindex = 0 ;                    // wrap at end
+      rbrindex = 0 ;                      // wrap at end
     }
-    rcount-- ;                          // Count is now one less
-    return *(ringbuf + rbrindex) ;      // return the oldest byte
-  }
+    rcount-- ;                            // Count is now one less
+    return *(ringbuf + rbrindex) ;        // return the oldest byte
+  #endif
 }
 
 
@@ -1465,17 +1461,11 @@ uint8_t getring()
 //******************************************************************************************
 void emptyring()
 {
-  if ( usespiram )
-  {
-    prcwinx = 0 ;
-    prcrinx = 32 ;                       // Set buffer to empty
-  }
-  else
-  {
-    rbwindex = 0 ;                      // Reset ringbuffer administration
-    rbrindex = RINGBFSIZ - 1 ;
-    rcount = 0 ;
-  }
+  rbwindex = 0 ;                          // Reset ringbuffer administration
+  rbrindex = RINGBFSIZ - 1 ;
+  rcount = 0 ;
+  prcwinx = 0 ;
+  prcrinx = 32 ;                          // Set buffer to empty
 }
 
 
@@ -1790,7 +1780,7 @@ void timer100()
     }
   }
 // Check for and execute new IR remote control commands
-#if defined ( USEIR )
+#if defined ( IR )
   if (irrecv.decode(&decodedIRCommand))
   {
     dbgprint ("IR Command received");
@@ -2627,15 +2617,12 @@ void setup()
   Serial.begin ( 115200 ) ;                            // For debug
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
-  if ( usespiram )                                     // Use SPI RAM?
-  {
+  #if defined ( SPIRAM )
     spiramSetup() ;                                    // Yes, do set-up
     emptyring() ;                                      // Empty the buffer
-  }
-  else
-  {
+  #else
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
-  }
+  #endif
   xml.init ( xmlbuffer, sizeof(xmlbuffer),             // Initilize XML stream.
              &XML_callback ) ;
   //memset ( &ini_block, 0, sizeof(ini_block) ) ;      // Init ini_block
@@ -2683,7 +2670,7 @@ void setup()
   dbgprint ( "Sketch size %d, free size %d",
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;
-#if defined ( USEIR )
+#if defined ( IR )
   irrecv.enableIRIn();                                 // Enable IR receiver
 #endif
 vs1053player.begin() ;                                 // Initialize VS1053 player
@@ -2691,7 +2678,7 @@ if ( vs1053player.getChipVersion() == 4 )
 { 
   vs1053player.loadDefaultVs1053Patches();             // Only perform an update if we really are using a VS1053
 }
-#if defined ( USELCD )
+#if defined ( LCD )
   dsp_begin();
   displayinfo ( "      Esp-radio     ", 0 ) ;
   delay(10),
@@ -2749,23 +2736,23 @@ if ( vs1053player.getChipVersion() == 4 )
   {
     gettime() ;                                        // Sync time
   }
-  if ( usespiram )
-  {
+  #if defined ( SPIRAM )
     dbgprint ( "Testing SPIRAM getring/putring" ) ;
-    for ( int i = 0 ; i < 96 ; i++ )                     // Test for 96 bytes, 3 chunks
+    for ( int i = 0 ; i < 96 ; i++ )                    // Test for 96 bytes, 3 chunks
     {
       putring ( i ) ;                                    // Store in spiram
       dbgprint ( "Test 1: %d, chunks avl is %d",         // Test, expect 0,0 1,0 2,0 .... 95,3
                 i, ringavail() ) ;
     }
-    for ( int i = 0 ; i < 96 ; i++ )                     // Test for 100 bytes
+    for ( int i = 0 ; i < 96 ; i++ )                    // Test for 100 bytes
     {
       uint8_t c = getring() ;                            // Read from spiram
       dbgprint ( "Test 2: %d, data is %d, ch av is %d",  // Test, expect 0,0,2 1,1,2 2,2,2 .... 95,95,0
                 i, c, ringavail() ) ;
     }
-    dbgprint ( "Chunks avl is %d", ringavail() ) ;       // Test, expect 0
-  }
+    dbgprint ( "Chunks avl is %d",                       // Test, expect 0
+              ringavail() ) ;
+  #endif
 }
 
 
@@ -2821,11 +2808,13 @@ void loop()
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
-    if ( usespiram && ( spiramdelay != 0 ) )           // Delay before reading SPIRAM?
-    {
-      spiramdelay-- ;                                  // Yes, count down
-      break ;                                          // and skip handling of data
-    }
+    #if defined ( SPIRAM )
+      if ( spiramdelay != 0 )                          // Delay before reading SPIRAM?
+      {
+        spiramdelay-- ;                                // Yes, count down
+        break ;                                        // and skip handling of data
+      }
+    #endif
     handlebyte_ch ( getring() ) ;                      // Yes, handle it
   }
   yield() ;
@@ -2947,7 +2936,7 @@ void loop()
   {
     gettime() ;                                         // Yes, get the current time
   }
-  #if defined ( USELCD )
+  #if defined ( LCD )
   if ( time_req )                                       // Time to refresh timetxt?
   {
     time_req = false ;                                  // Yes, clear request
@@ -3227,10 +3216,10 @@ void handlebyte ( uint8_t b, bool force )
                       ", metaint is %d",               // and metaint
                     bitrate, metaint ) ;
           datamode = DATA ;                            // Expecting data now
-          spiramdelay = SPIRAMDELAY ;                  // Start delay
-
+          #if defined ( SPIRAM )
+            spiramdelay = SPIRAMDELAY ;                // Start delay
+          #endif
           //emptyring() ;                              // Empty SPIRAM buffer (not sure about this)
-
           datacount = metaint ;                        // Number of bytes before first metadata
           bufcnt = 0 ;                                 // Reset buffer count
           vs1053player.switchToMp3Mode() ;
@@ -3754,12 +3743,19 @@ char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-    if ( usespiram )                                  // SPI RAM use?
-    {
+    #if defined ( SPIRAM )                            // SPI RAM use?         
       rcount = dataAvailable() ;                      // Yes, get free space
-    }
-    sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
+    #endif
+    if ( mp3client )
+    {
+      sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
               system_get_free_heap_size(), rcount, mp3client->available(), bitrate ) ;
+    }
+    else
+    {
+      sprintf ( reply, "Free memory is %d, ringbuf %d, No stream available",
+              system_get_free_heap_size(), rcount ) ;      
+    }
   }
   // Commands for bass/treble control
   else if ( argument.startsWith ( "tone" ) )          // Tone command
