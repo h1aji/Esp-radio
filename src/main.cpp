@@ -46,24 +46,25 @@ extern "C"
 // Use SPIRAM as ringbuffer
 //#define SPIRAM
 #if defined ( SPIRAM )
-// SPI RAM settings
-#include <ESP8266Spiram.h>
-// GPIO 1O CS pin
-#define SRAM_CS           10
-// 23LC1024 supports theorically up to 20MHz
-#define SRAM_FREQ         16e6
-// Total size SPI ram in bytes
-#define SRAM_SIZE         131072
-// Chunk size
-#define CHUNKSIZE         32
-// Total size SPI ram in chunks
-#define SRAM_CH_SIZE      4096
-// Delay (in bytes) before reading from SPIRAM
-#define SPIRAMDELAY       200000
+  // SPI RAM settings
+  #include <ESP8266Spiram.h>
+  // GPIO 1O CS pin
+  #define SRAM_CS           10
+  // 23LC1024 supports theorically up to 20MHz
+  #define SRAM_FREQ         16e6
+  // Total size SPI ram in bytes
+  #define SRAM_SIZE         131072
+  // Chunk size
+  #define CHUNKSIZE         32
+  // Total size SPI ram in chunks
+  #define SRAM_CH_SIZE      4096
+  // Delay (in bytes) before reading from SPIRAM
+  #define SPIRAMDELAY       200000
+#else
+  // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
+  #define RINGBFSIZ         20000
 #endif
 //
-// Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-#define RINGBFSIZ         20000
 // Debug buffer size
 #define DEBUG_BUFFER_SIZE 100
 // Name of the ini file
@@ -86,77 +87,77 @@ extern "C"
 // Define LCD if you are using LCD 2004
 #define LCD
 #if defined ( LCD )
-#include <Wire.h>
-// Pins for LCD 2004
-#define SDA_PIN     4
-#define SCL_PIN     5
-// Adjust for your display
-#define I2C_ADDRESS 0x27
-// Enable ACK for I2C communication
-#define ACKENA      true
-//
-#define DELAY_ENABLE_PULSE_SETTLE           50               // Command requires > 37us to settle
-#define FLAG_BACKLIGHT_ON                   0b00001000       // Bit 3, backlight enabled (disabled if clear)
-#define FLAG_ENABLE                         0b00000100       // Bit 2, Enable
-#define FLAG_RS_DATA                        0b00000001       // Bit 0, RS=data (command if clear)
-#define FLAG_RS_COMMAND                     0b00000000       // Command
-//
-#define COMMAND_CLEAR_DISPLAY               0x01
-#define COMMAND_RETURN_HOME                 0x02
-#define COMMAND_ENTRY_MODE_SET              0x04
-#define COMMAND_DISPLAY_CONTROL             0x08
-#define COMMAND_FUNCTION_SET                0x20
-#define COMMAND_SET_DDRAM_ADDR              0x80
-//
-#define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
-#define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
-//
-#define FLAG_FUNCTION_SET_MODE_4BIT         0x00
-#define FLAG_FUNCTION_SET_LINES_2           0x08
-#define FLAG_FUNCTION_SET_DOTS_5X8          0x00
-//
-#define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
-#define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
-//
-#define dsp_print(a)                                         // Print a string 
-#define dsp_setCursor(a,b)                                   // Position the cursor
-#define dsp_getwidth()                      20               // Get width of screen
-#define dsp_getheight()                     4                // Get height of screen
+  #include <Wire.h>
+  // Pins for LCD 2004
+  #define SDA_PIN     4
+  #define SCL_PIN     5
+  // Adjust for your display
+  #define I2C_ADDRESS 0x27
+  // Enable ACK for I2C communication
+  #define ACKENA      true
+  //
+  #define DELAY_ENABLE_PULSE_SETTLE           50               // Command requires > 37us to settle
+  #define FLAG_BACKLIGHT_ON                   0b00001000       // Bit 3, backlight enabled (disabled if clear)
+  #define FLAG_ENABLE                         0b00000100       // Bit 2, Enable
+  #define FLAG_RS_DATA                        0b00000001       // Bit 0, RS=data (command if clear)
+  #define FLAG_RS_COMMAND                     0b00000000       // Command
+  //
+  #define COMMAND_CLEAR_DISPLAY               0x01
+  #define COMMAND_RETURN_HOME                 0x02
+  #define COMMAND_ENTRY_MODE_SET              0x04
+  #define COMMAND_DISPLAY_CONTROL             0x08
+  #define COMMAND_FUNCTION_SET                0x20
+  #define COMMAND_SET_DDRAM_ADDR              0x80
+  //
+  #define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
+  #define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
+  //
+  #define FLAG_FUNCTION_SET_MODE_4BIT         0x00
+  #define FLAG_FUNCTION_SET_LINES_2           0x08
+  #define FLAG_FUNCTION_SET_DOTS_5X8          0x00
+  //
+  #define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
+  #define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
+  //
+  #define dsp_print(a)                                         // Print a string 
+  #define dsp_setCursor(a,b)                                   // Position the cursor
+  #define dsp_getwidth()                      20               // Get width of screen
+  #define dsp_getheight()                     4                // Get height of screen
 #endif
 //
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
 #define IR
 #if defined ( IR )
-#include <IRremoteESP8266.h>
-#include <IRrecv.h>
-#include <IRutils.h>
-// IR receiver pin, 0 for GPIO 0
-uint16_t IRRECV_PIN = 0;
-IRrecv irrecv ( IRRECV_PIN ) ;
-decode_results decodedIRCommand ;
-// IRremote button definitions
-#define IR_POWER      0xFFA25D
-#define IR_MODE       0xFF629D   // Mode
-#define IR_VOLDOWN    0xFFA857
-#define IR_VOLUP      0xFF906F
-#define IR_PREV       0xFF02FD
-#define IR_NEXT       0xFFC23D
-#define IR_MUTE       0xFFE21D
-#define IR_STOP       0xFFE01F   // EQ
-#define IR_PLAY       0xFF22DD   // Play/Pause
-#define IR_RPT        0xFF9867   // RPT
-#define IR_USD        0xFFB04F   // U/SD
-#define IR_PRESET00   0xFF6897
-#define IR_PRESET01   0xFF30CF
-#define IR_PRESET02   0xFF18E7
-#define IR_PRESET03   0xFF7A85
-#define IR_PRESET04   0xFF10EF
-#define IR_PRESET05   0xFF38C7
-#define IR_PRESET06   0xFF5AA5
-#define IR_PRESET07   0xFF42BD
-#define IR_PRESET08   0xFF4AB5
-#define IR_PRESET09   0xFF52AD
+  #include <IRremoteESP8266.h>
+  #include <IRrecv.h>
+  #include <IRutils.h>
+  // IR receiver pin, 0 for GPIO 0
+  uint16_t IRRECV_PIN = 0;
+  IRrecv irrecv ( IRRECV_PIN ) ;
+  decode_results decodedIRCommand ;
+  // IRremote button definitions
+  #define IR_POWER      0xFFA25D
+  #define IR_MODE       0xFF629D   // Mode
+  #define IR_VOLDOWN    0xFFA857
+  #define IR_VOLUP      0xFF906F
+  #define IR_PREV       0xFF02FD
+  #define IR_NEXT       0xFFC23D
+  #define IR_MUTE       0xFFE21D
+  #define IR_STOP       0xFFE01F   // EQ
+  #define IR_PLAY       0xFF22DD   // Play/Pause
+  #define IR_RPT        0xFF9867   // RPT
+  #define IR_USD        0xFFB04F   // U/SD
+  #define IR_PRESET00   0xFF6897
+  #define IR_PRESET01   0xFF30CF
+  #define IR_PRESET02   0xFF18E7
+  #define IR_PRESET03   0xFF7A85
+  #define IR_PRESET04   0xFF10EF
+  #define IR_PRESET05   0xFF38C7
+  #define IR_PRESET06   0xFF5AA5
+  #define IR_PRESET07   0xFF42BD
+  #define IR_PRESET08   0xFF4AB5
+  #define IR_PRESET09   0xFF52AD
 #endif
 
 
@@ -239,10 +240,6 @@ bool             xmlreq = false ;                          // Request for XML pa
 bool             hostreq = false ;                         // Request for new host
 bool             reqtone = false ;                         // New tone setting requested
 bool             muteflag = false ;                        // Mute output
-uint8_t*         ringbuf ;                                 // Ringbuffer for VS1053
-uint16_t         rbwindex = 0 ;                            // Fill pointer in ringbuffer
-uint16_t         rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
-uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
 uint16_t         analogsw[NUMANA] = { asw1, asw2, asw3 } ; // 3 levels of analog input
 uint16_t         analogrest ;                              // Rest value of analog input
 bool             resetreq = false ;                        // Request to reset the ESP8266
@@ -258,13 +255,18 @@ File             mp3file ;                                 // File containing mp
 bool             localfile = false ;                       // Play from local mp3-file or not
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
-uint16_t         chcount ;                                 // Number of chunks currently in buffer
-uint32_t         readinx ;                                 // Read index
-uint32_t         writeinx ;                                // write index
-uint8_t          prcwinx ;                                 // Index in pwchunk (see putring)
-uint8_t          prcrinx ;                                 // Index in prchunk (see getring)
 #if defined ( SPIRAM )
+  uint16_t       chcount ;                                 // Number of chunks currently in buffer
+  uint32_t       readinx ;                                 // Read index
+  uint32_t       writeinx ;                                // write index
+  uint8_t        prcwinx ;                                 // Index in pwchunk (see putring)
+  uint8_t        prcrinx ;                                 // Index in prchunk (see getring)
   int32_t        spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
+#else
+  uint8_t*       ringbuf ;                                 // Ringbuffer for VS1053
+  uint16_t       rbwindex = 0 ;                            // Fill pointer in ringbuffer
+  uint16_t       rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
+  uint16_t       rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
 #endif
 bool             scrollflag = false ;                      // Request to scroll LCD
 struct tm        timeinfo ;                                // Will be filled by NTP server
@@ -2857,103 +2859,103 @@ void loop()
     }
     else
     {
-      if ( playlist_num )                               // Playing from playlist?
+      if ( playlist_num )                              // Playing from playlist?
       { // Yes, retrieve URL of playlist
         playlist_num += ini_block.newpreset -
-                        currentpreset ;                 // Next entry in playlist
-        ini_block.newpreset = currentpreset ;           // Stay at current preset
+                        currentpreset ;                // Next entry in playlist
+        ini_block.newpreset = currentpreset ;          // Stay at current preset
       }
       else
       {
-        host = readhostfrominifile(ini_block.newpreset) ; // Lookup preset in ini-file
+        host = readhostfrominifile ( ini_block.newpreset ) ; // Lookup preset in ini-file
       }
       dbgprint ( "New preset/file requested (%d/%d) from %s",
                  currentpreset, playlist_num, host.c_str() ) ;
-      if ( host != ""  )                                // Preset in ini-file?
+      if ( host != ""  )                               // Preset in ini-file?
       {
-        hostreq = true ;                                // Force this station as new preset
+        hostreq = true ;                               // Force this station as new preset
       }
       else
       {
         // This preset is not available, return to preset 0, will be handled in next loop()
-        ini_block.newpreset = 0 ;                       // Wrap to first station
+        ini_block.newpreset = 0 ;                      // Wrap to first station
       }
     }
   }
-  if ( hostreq )                                        // New preset or station?
+  if ( hostreq )                                       // New preset or station?
   {
     hostreq = false ;
-    currentpreset = ini_block.newpreset ;               // Remember current preset
+    currentpreset = ini_block.newpreset ;              // Remember current preset
     
-    localfile = host.startsWith ( "localhost/" ) ;      // Find out if this URL is on localhost
-    if ( localfile )                                    // Play file from localhost?
+    localfile = host.startsWith ( "localhost/" ) ;     // Find out if this URL is on localhost
+    if ( localfile )                                   // Play file from localhost?
     {
-      if ( connecttofile() )                            // Yes, open mp3-file
+      if ( connecttofile() )                           // Yes, open mp3-file
       {
-        datamode = DATA ;                               // Start in DATA mode
+        datamode = DATA ;                              // Start in DATA mode
       }
     }
     else
     {
-      if ( host.startsWith ( "ihr/" ) )                 // iHeartRadio station requested?
+      if ( host.startsWith ( "ihr/" ) )                // iHeartRadio station requested?
       {
-        host = host.substring ( 4 ) ;                   // Yes, remove "ihr/"
-        host = xmlparse ( host ) ;                      // Parse the xml to get the host
+        host = host.substring ( 4 ) ;                  // Yes, remove "ihr/"
+        host = xmlparse ( host ) ;                     // Parse the xml to get the host
       }
-      connecttohost() ;                                 // Switch to new host
+      connecttohost() ;                                // Switch to new host
     }
   }
-  if ( xmlreq )                                         // Directly xml requested?
+  if ( xmlreq )                                        // Directly xml requested?
   {
-    xmlreq = false ;                                    // Yes, clear request flag
-    host = xmlparse ( host ) ;                          // Parse the xml to get the host
-    connecttohost() ;                                   // and connect to this host
+    xmlreq = false ;                                   // Yes, clear request flag
+    host = xmlparse ( host ) ;                         // Parse the xml to get the host
+    connecttohost() ;                                  // and connect to this host
   }
-  if ( reqtone )                                        // Request to change tone?
+  if ( reqtone )                                       // Request to change tone?
   {
     reqtone = false ;
-    vs1053player.setTone ( ini_block.rtone ) ;          // Set SCI_BASS to requested value
+    vs1053player.setTone ( ini_block.rtone ) ;         // Set SCI_BASS to requested value
   }
-  if ( resetreq )                                       // Reset requested?
+  if ( resetreq )                                      // Reset requested?
   {
-    delay ( 1000 ) ;                                    // Yes, wait some time
-    ESP.restart() ;                                     // Reboot
+    delay ( 1000 ) ;                                   // Yes, wait some time
+    ESP.restart() ;                                    // Reboot
   }
   if ( muteflag )
   {
-    vs1053player.setVolume ( 0 ) ;                      // Mute
+    vs1053player.setVolume ( 0 ) ;                     // Mute
   }
   else
   {
-    vs1053player.setVolume ( ini_block.reqvol ) ;       // Unmute
+    vs1053player.setVolume ( ini_block.reqvol ) ;      // Unmute
   }
-  if ( testfilename.length() )                          // File to test?
+  if ( testfilename.length() )                         // File to test?
   {
-    testfile ( testfilename ) ;                         // Yes, do the test
-    testfilename = "" ;                                 // Clear test request
+    testfile ( testfilename ) ;                        // Yes, do the test
+    testfilename = "" ;                                // Clear test request
   }
-  if ( time_req && NetworkFound )                       // Time to refresh time?
+  if ( time_req && NetworkFound )                      // Time to refresh time?
   {
-    gettime() ;                                         // Yes, get the current time
+    gettime() ;                                        // Yes, get the current time
   }
   #if defined ( LCD )
-  if ( time_req )                                       // Time to refresh timetxt?
-  {
-    time_req = false ;                                  // Yes, clear request
-    if ( NetworkFound )                                 // Time available?
+    if ( time_req )                                    // Time to refresh timetxt?
     {
-      displaytime ( timetxt ) ;                         // Write to TFT screen
-      displayvolume() ;                                 // Show volume on display
+      time_req = false ;                               // Yes, clear request
+      if ( NetworkFound )                              // Time available?
+      {
+        displaytime ( timetxt ) ;                      // Write to TFT screen
+        displayvolume() ;                              // Show volume on display
+      }
     }
-  }
-  if ( scrollflag )                                     // Time to scroll?
-  {
-    dsp_update() ;                                      // LCD scroll
-    scrollflag = false ;                                // Yes, reset flag
-  }
+    if ( scrollflag )                                  // Time to scroll?
+    {
+      dsp_update() ;                                   // LCD scroll
+      scrollflag = false ;                             // Yes, reset flag
+    }
   #endif
-  scanserial() ;                                        // Handle serial input
-  ArduinoOTA.handle() ;                                 // Check for OTA
+  scanserial() ;                                       // Handle serial input
+  ArduinoOTA.handle() ;                                // Check for OTA
 }
 
 
@@ -2964,27 +2966,27 @@ void loop()
 //**************************************************************************************************
 String decode_spec_chars ( String str )
 {
-  int    inx, inx2 ;                                // Indexes in string
-  char   c ;                                        // Character from string
-  char   val ;                                      // Converted character
+  int    inx, inx2 ;                                  // Indexes in string
+  char   c ;                                          // Character from string
+  char   val ;                                        // Converted character
   String res = str ;
 
-  while ( ( inx = res.indexOf ( "&#" ) ) >= 0 )     // Start sequence in string?
+  while ( ( inx = res.indexOf ( "&#" ) ) >= 0 )       // Start sequence in string?
   {
-    inx2 = res.indexOf ( ";", inx ) ;               // Yes, search for stop character
-    if ( inx2 < 0 )                                 // Stop character found
+    inx2 = res.indexOf ( ";", inx ) ;                 // Yes, search for stop character
+    if ( inx2 < 0 )                                   // Stop character found
     {
-      break ;                                       // Malformed string
+      break ;                                         // Malformed string
     }
-    res = str.substring ( 0, inx ) ;                // First part
-    inx += 2 ;                                      // skip over start sequence
-    val = 0 ;                                       // Init result of 
-    while ( ( c = str[inx++] ) != ';' )             // Convert character
+    res = str.substring ( 0, inx ) ;                  // First part
+    inx += 2 ;                                        // skip over start sequence
+    val = 0 ;                                         // Init result of 
+    while ( ( c = str[inx++] ) != ';' )               // Convert character
     {
       val = val * 10 + c - '0' ;
     }
-    res += ( String ( val ) +                       // Add special char to string
-             str.substring ( ++inx2 ) ) ;           // Add rest of string
+    res += ( String ( val ) +                         // Add special char to string
+             str.substring ( ++inx2 ) ) ;             // Add rest of string
   }
   return res ;
 }
