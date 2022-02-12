@@ -3,9 +3,8 @@
 //*              by Ed Smallenburg (ed@smallenburg.nl)                                           *
 //************************************************************************************************
 //
-//
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sun, 12 Dec 2021 12:10:00 GMT"
+#define VERSION "Sun, 11 Feb 2022 12:10:00 GMT"
 //
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
@@ -19,10 +18,11 @@
 #include <TinyXML.h>
 #include <LittleFS.h>
 #include <time.h>
+#include <VS1053.h>
 
 extern "C"
 {
-#include <user_interface.h>
+  #include <user_interface.h>
 }
 
 // Definitions for 3 control switches on analog input
@@ -31,9 +31,6 @@ extern "C"
 // Switches are programmed as "Goto station 1", "Next station" and "Previous station" respectively.
 // Set these values to 2000 if not used or tie analog input to ground.
 #define NUMANA  3
-//#define asw1    252
-//#define asw2    334
-//#define asw3    499
 #define asw1    2000
 #define asw2    2000
 #define asw3    2000
@@ -44,26 +41,30 @@ extern "C"
 #define VS1053_DCS    16
 #define VS1053_DREQ   2
 //
-// Use SPIRAM as ringbuffer. false = do not use
-#define SPIRAM true
-#include <ESP8266Spiram.h>
-// SPI RAM settings
-// GPIO 1O CS pin
-#define SRAM_CS           10
-// 23LC1024 supports theorically up to 20MHz
-#define SRAM_FREQ         16e6
-// Total size SPI ram in bytes
-#define SRAM_SIZE         131072
-// Chunk size
-#define CHUNKSIZE         32
-// Total size SPI ram in chunks
-#define SRAM_CH_SIZE      4096
-// Delay (in bytes) before reading from SPIRAM
-#define SPIRAMDELAY       200000
-// Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-#define RINGBFSIZ         20000
+// Use SPIRAM as ringbuffer
+//#define SPIRAM
+#if defined ( SPIRAM )
+  // SPI RAM settings
+  #include <ESP8266Spiram.h>
+  // GPIO 1O CS pin
+  #define SRAM_CS           10
+  // 23LC1024 supports theorically up to 20MHz
+  #define SRAM_FREQ         16e6
+  // Total size SPI ram in bytes
+  #define SRAM_SIZE         131072
+  // Chunk size
+  #define CHUNKSIZE         32
+  // Total size SPI ram in chunks
+  #define SRAM_CH_SIZE      4096
+  // Delay (in bytes) before reading from SPIRAM
+  #define SPIRAMDELAY       200000
+#else
+  // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
+  #define RINGBFSIZ         20000
+#endif
+//
 // Debug buffer size
-#define DEBUG_BUFFER_SIZE 100
+#define DEBUG_BUFFER_SIZE   100
 // Name of the ini file
 #define INIFILENAME "/radio.ini"
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
@@ -71,7 +72,7 @@ extern "C"
 // Also used for other naming.
 #define NAME "Esp-radio"
 // Maximum number of MQTT reconnects before give-up
-#define MAXMQTTCONNECTS 20
+#define MAXMQTTCONNECTS     20
 //
 // NTP settings
 // Default NZ time zone
@@ -81,80 +82,80 @@ extern "C"
 // Default server for NTP
 #define NTP_SERVER "pool.ntp.org"
 //
-// Define USELCD if you are using LCD 20x4
-#define USELCD
-#if defined ( USELCD )
-#include <Wire.h>
-// Pins for LCD 2004
-#define SDA_PIN     4
-#define SCL_PIN     5
-// Adjust for your display
-#define I2C_ADDRESS 0x27
-// Enable ACK for I2C communication
-#define ACKENA      true
-//
-#define DELAY_ENABLE_PULSE_SETTLE           50               // Command requires > 37us to settle
-#define FLAG_BACKLIGHT_ON                   0b00001000       // Bit 3, backlight enabled (disabled if clear)
-#define FLAG_ENABLE                         0b00000100       // Bit 2, Enable
-#define FLAG_RS_DATA                        0b00000001       // Bit 0, RS=data (command if clear)
-#define FLAG_RS_COMMAND                     0b00000000       // Command
-//
-#define COMMAND_CLEAR_DISPLAY               0x01
-#define COMMAND_RETURN_HOME                 0x02
-#define COMMAND_ENTRY_MODE_SET              0x04
-#define COMMAND_DISPLAY_CONTROL             0x08
-#define COMMAND_FUNCTION_SET                0x20
-#define COMMAND_SET_DDRAM_ADDR              0x80
-//
-#define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
-#define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
-//
-#define FLAG_FUNCTION_SET_MODE_4BIT         0x00
-#define FLAG_FUNCTION_SET_LINES_2           0x08
-#define FLAG_FUNCTION_SET_DOTS_5X8          0x00
-//
-#define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
-#define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
-//
-#define dsp_print(a)                                         // Print a string 
-#define dsp_setCursor(a,b)                                   // Position the cursor
-#define dsp_getwidth()                      20               // Get width of screen
-#define dsp_getheight()                     4                // Get height of screen
+// Define LCD if you are using LCD 2004
+#define LCD
+#if defined ( LCD )
+  #include <Wire.h>
+  // Pins for LCD 2004
+  #define SDA_PIN     4
+  #define SCL_PIN     5
+  // Adjust for your display
+  #define I2C_ADDRESS 0x27
+  // Enable ACK for I2C communication
+  #define ACKENA      true
+  //
+  #define DELAY_ENABLE_PULSE_SETTLE           50               // Command requires > 37us to settle
+  #define FLAG_BACKLIGHT_ON                   0b00001000       // Bit 3, backlight enabled (disabled if clear)
+  #define FLAG_ENABLE                         0b00000100       // Bit 2, Enable
+  #define FLAG_RS_DATA                        0b00000001       // Bit 0, RS=data (command if clear)
+  #define FLAG_RS_COMMAND                     0b00000000       // Command
+  //
+  #define COMMAND_CLEAR_DISPLAY               0x01
+  #define COMMAND_RETURN_HOME                 0x02
+  #define COMMAND_ENTRY_MODE_SET              0x04
+  #define COMMAND_DISPLAY_CONTROL             0x08
+  #define COMMAND_FUNCTION_SET                0x20
+  #define COMMAND_SET_DDRAM_ADDR              0x80
+  //
+  #define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
+  #define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
+  //
+  #define FLAG_FUNCTION_SET_MODE_4BIT         0x00
+  #define FLAG_FUNCTION_SET_LINES_2           0x08
+  #define FLAG_FUNCTION_SET_DOTS_5X8          0x00
+  //
+  #define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
+  #define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
+  //
+  #define dsp_print(a)                                         // Print a string 
+  #define dsp_setCursor(a,b)                                   // Position the cursor
+  #define dsp_getwidth()                      20               // Get width of screen
+  #define dsp_getheight()                     4                // Get height of screen
 #endif
 //
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
 // Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
-#define USEIR
-#if defined ( USEIR )
-#include <IRremoteESP8266.h>
-#include <IRrecv.h>
-#include <IRutils.h>
-// IR receiver pin, 0 for GPIO 0
-uint16_t IRRECV_PIN = 0;
-IRrecv irrecv ( IRRECV_PIN ) ;
-decode_results decodedIRCommand ;
-// IRremote button definitions
-#define IR_POWER      0xFFA25D
-#define IR_MODE       0xFF629D   // Mode
-#define IR_VOLDOWN    0xFFA857
-#define IR_VOLUP      0xFF906F
-#define IR_PREV       0xFF02FD
-#define IR_NEXT       0xFFC23D
-#define IR_MUTE       0xFFE21D
-#define IR_STOP       0xFFE01F   // EQ
-#define IR_PLAY       0xFF22DD   // Play/Pause
-#define IR_RPT        0xFF9867   // RPT
-#define IR_USD        0xFFB04F   // U/SD
-#define IR_PRESET00   0xFF6897
-#define IR_PRESET01   0xFF30CF
-#define IR_PRESET02   0xFF18E7
-#define IR_PRESET03   0xFF7A85
-#define IR_PRESET04   0xFF10EF
-#define IR_PRESET05   0xFF38C7
-#define IR_PRESET06   0xFF5AA5
-#define IR_PRESET07   0xFF42BD
-#define IR_PRESET08   0xFF4AB5
-#define IR_PRESET09   0xFF52AD
+#define IR
+#if defined ( IR )
+  #include <IRremoteESP8266.h>
+  #include <IRrecv.h>
+  #include <IRutils.h>
+  // IR receiver pin, 0 for GPIO 0
+  uint16_t IRRECV_PIN = 0;
+  IRrecv irrecv ( IRRECV_PIN ) ;
+  decode_results decodedIRCommand ;
+  // IRremote button definitions
+  #define IR_POWER      0xFFA25D
+  #define IR_MODE       0xFF629D   // Mode
+  #define IR_VOLDOWN    0xFFA857
+  #define IR_VOLUP      0xFF906F
+  #define IR_PREV       0xFF02FD
+  #define IR_NEXT       0xFFC23D
+  #define IR_MUTE       0xFFE21D
+  #define IR_STOP       0xFFE01F   // EQ
+  #define IR_PLAY       0xFF22DD   // Play/Pause
+  #define IR_RPT        0xFF9867   // RPT
+  #define IR_USD        0xFFB04F   // U/SD
+  #define IR_PRESET00   0xFF6897
+  #define IR_PRESET01   0xFF30CF
+  #define IR_PRESET02   0xFF18E7
+  #define IR_PRESET03   0xFF7A85
+  #define IR_PRESET04   0xFF10EF
+  #define IR_PRESET05   0xFF38C7
+  #define IR_PRESET06   0xFF5AA5
+  #define IR_PRESET07   0xFF42BD
+  #define IR_PRESET08   0xFF4AB5
+  #define IR_PRESET09   0xFF52AD
 #endif
 
 
@@ -178,7 +179,8 @@ void   publishIP() ;
 String xmlparse ( String mount ) ;
 bool   connecttohost() ;
 void   gettime() ;
-
+void   XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
+                    char* data,  uint16_t dataLen ) ;
 
 //
 //******************************************************************************************
@@ -236,10 +238,6 @@ bool             xmlreq = false ;                          // Request for XML pa
 bool             hostreq = false ;                         // Request for new host
 bool             reqtone = false ;                         // New tone setting requested
 bool             muteflag = false ;                        // Mute output
-uint8_t*         ringbuf ;                                 // Ringbuffer for VS1053
-uint16_t         rbwindex = 0 ;                            // Fill pointer in ringbuffer
-uint16_t         rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
-uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
 uint16_t         analogsw[NUMANA] = { asw1, asw2, asw3 } ; // 3 levels of analog input
 uint16_t         analogrest ;                              // Rest value of analog input
 bool             resetreq = false ;                        // Request to reset the ESP8266
@@ -255,13 +253,19 @@ File             mp3file ;                                 // File containing mp
 bool             localfile = false ;                       // Play from local mp3-file or not
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
-bool             usespiram = SPIRAM ;                      // For check using SPIRAM at runtime
-uint16_t         chcount ;                                 // Number of chunks currently in buffer
-uint32_t         readinx ;                                 // Read index
-uint32_t         writeinx ;                                // write index
-uint8_t          prcwinx ;                                 // Index in pwchunk (see putring)
-uint8_t          prcrinx ;                                 // Index in prchunk (see getring)
-int32_t          spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
+uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
+#if defined ( SPIRAM )
+  uint16_t       chcount ;                                 // Number of chunks currently in buffer
+  uint32_t       readinx ;                                 // Read index
+  uint32_t       writeinx ;                                // write index
+  uint8_t        prcwinx ;                                 // Index in pwchunk (see putring)
+  uint8_t        prcrinx ;                                 // Index in prchunk (see getring)
+  int32_t        spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
+#else
+  uint8_t*       ringbuf ;                                 // Ringbuffer for VS1053
+  uint16_t       rbwindex = 0 ;                            // Fill pointer in ringbuffer
+  uint16_t       rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
+#endif
 bool             scrollflag = false ;                      // Request to scroll LCD
 struct tm        timeinfo ;                                // Will be filled by NTP server
 char             timetxt[9] ;                              // Converted timeinfo
@@ -295,397 +299,12 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 #include "radio_css.h"
 #include "favicon_ico.h"
 
-//
-//******************************************************************************************
-// VS1053 stuff.  Based on maniacbug library.                                              *
-//******************************************************************************************
-// VS1053 class definition.                                                                *
-//******************************************************************************************
-class VS1053
-{
-  private:
-    uint8_t       cs_pin ;                        // Pin where CS line is connected
-    uint8_t       dcs_pin ;                       // Pin where DCS line is connected
-    uint8_t       dreq_pin ;                      // Pin where DREQ line is connected
-    uint8_t       curvol ;                        // Current volume setting 0..100%
-    const uint8_t vs1053_chunk_size = 32 ;
-    // SCI Register
-    const uint8_t SCI_MODE          = 0x0 ;
-    const uint8_t SCI_BASS          = 0x2 ;
-    const uint8_t SCI_CLOCKF        = 0x3 ;
-    const uint8_t SCI_AUDATA        = 0x5 ;
-    const uint8_t SCI_WRAM          = 0x6 ;
-    const uint8_t SCI_WRAMADDR      = 0x7 ;
-    const uint8_t SCI_AIADDR        = 0xA ;
-    const uint8_t SCI_VOL           = 0xB ;
-    const uint8_t SCI_AICTRL0       = 0xC ;
-    const uint8_t SCI_AICTRL1       = 0xD ;
-    const uint8_t SCI_num_registers = 0xF ;
-    // SCI_MODE bits
-    const uint8_t SM_SDINEW         = 11 ;        // Bitnumber in SCI_MODE always on
-    const uint8_t SM_RESET          = 2 ;         // Bitnumber in SCI_MODE soft reset
-    const uint8_t SM_CANCEL         = 3 ;         // Bitnumber in SCI_MODE cancel song
-    const uint8_t SM_TESTS          = 5 ;         // Bitnumber in SCI_MODE for tests
-    const uint8_t SM_LINE1          = 14 ;        // Bitnumber in SCI_MODE for Line input
-    SPISettings   VS1053_SPI ;                    // SPI settings for this slave
-    uint8_t       endFillByte ;                   // Byte to send when stopping song
-  protected:
-    inline void await_data_request() const
-    {
-      while ( !digitalRead ( dreq_pin ) )
-      {
-        yield() ;                                 // Very short delay
-      }
-    }
-
-    inline void control_mode_on() const
-    {
-      SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
-      digitalWrite ( dcs_pin, HIGH ) ;            // Bring slave in control mode
-      digitalWrite ( cs_pin, LOW ) ;
-    }
-
-    inline void control_mode_off() const
-    {
-      digitalWrite ( cs_pin, HIGH ) ;             // End control mode
-      SPI.endTransaction() ;                      // Allow other SPI users
-    }
-
-    inline void data_mode_on() const
-    {
-      SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
-      digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
-      digitalWrite ( dcs_pin, LOW ) ;
-    }
-
-    inline void data_mode_off() const
-    {
-      digitalWrite ( dcs_pin, HIGH ) ;            // End data mode
-      SPI.endTransaction() ;                      // Allow other SPI users
-    }
-
-    uint16_t read_register ( uint8_t _reg ) const ;
-    void     write_register ( uint8_t _reg, uint16_t _value ) const ;
-    void     sdi_send_buffer ( uint8_t* data, size_t len ) ;
-    void     sdi_send_fillers ( size_t length ) ;
-    void     wram_write ( uint16_t address, uint16_t data ) ;
-    uint16_t wram_read ( uint16_t address ) ;
-
-  public:
-    // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
-    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) ;
-    void     begin() ;                                   // Begin operation.  Sets pins correctly,
-    // and prepares SPI bus.
-    void     startSong() ;                               // Prepare to start playing. Call this each
-    // time a new song starts.
-    void     playChunk ( uint8_t* data, size_t len ) ;   // Play a chunk of data.  Copies the data to
-    // the chip.  Blocks until complete.
-    void     stopSong() ;                                // Finish playing a song. Call this after
-    // the last playChunk call.
-    void     setVolume ( uint8_t vol ) ;                 // Set the player volume.Level from 0-100,
-    // higher is louder.
-    void     setTone ( uint8_t* rtone ) ;                // Set the player baas/treble, 4 nibbles for
-    // treble gain/freq and bass gain/freq
-    uint8_t  getVolume() ;                               // Get the currenet volume setting.
-    // higher is louder.
-    void     printDetails ( const char *header ) ;       // Print configuration details to serial output.
-    void     softReset() ;                               // Do a soft reset
-    bool     testComm ( const char *header ) ;           // Test communication with module
-    inline bool data_request() const
-    {
-      return ( digitalRead ( dreq_pin ) == HIGH ) ;
-    }
-    void     AdjustRate ( long ppm2 ) ;                  // Fine tune the datarate
-} ;
-
-//******************************************************************************************
-// VS1053 class implementation.                                                            *
-//******************************************************************************************
-
-VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) :
-  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin)
-{
-}
-
-uint16_t VS1053::read_register ( uint8_t _reg ) const
-{
-  uint16_t result ;
-
-  control_mode_on() ;
-  SPI.write ( 3 ) ;                                // Read operation
-  SPI.write ( _reg ) ;                             // Register to write (0..0xF)
-  // Note: transfer16 does not seem to work
-  result = ( SPI.transfer ( 0xFF ) << 8 ) |        // Read 16 bits data
-           ( SPI.transfer ( 0xFF ) ) ;
-  await_data_request() ;                           // Wait for DREQ to be HIGH again
-  control_mode_off() ;
-  return result ;
-}
-
-void VS1053::write_register ( uint8_t _reg, uint16_t _value ) const
-{
-  control_mode_on( );
-  SPI.write ( 2 ) ;                                // Write operation
-  SPI.write ( _reg ) ;                             // Register to write (0..0xF)
-  SPI.write16 ( _value ) ;                         // Send 16 bits data
-  await_data_request() ;
-  control_mode_off() ;
-}
-
-void VS1053::sdi_send_buffer ( uint8_t* data, size_t len )
-{
-  size_t chunk_length ;                            // Length of chunk 32 byte or shorter
-
-  data_mode_on() ;
-  while ( len )                                    // More to do?
-  {
-    await_data_request() ;                         // Wait for space available
-    chunk_length = len ;
-    if ( len > vs1053_chunk_size )
-    {
-      chunk_length = vs1053_chunk_size ;
-    }
-    len -= chunk_length ;
-    SPI.writeBytes ( data, chunk_length ) ;
-    data += chunk_length ;
-  }
-  data_mode_off() ;
-}
-
-void VS1053::sdi_send_fillers ( size_t len )
-{
-  size_t chunk_length ;                            // Length of chunk 32 byte or shorter
-
-  data_mode_on() ;
-  while ( len )                                    // More to do?
-  {
-    await_data_request() ;                         // Wait for space available
-    chunk_length = len ;
-    if ( len > vs1053_chunk_size )
-    {
-      chunk_length = vs1053_chunk_size ;
-    }
-    len -= chunk_length ;
-    while ( chunk_length-- )
-    {
-      SPI.write ( endFillByte ) ;
-    }
-  }
-  data_mode_off();
-}
-
-void VS1053::wram_write ( uint16_t address, uint16_t data )
-{
-  write_register ( SCI_WRAMADDR, address ) ;
-  write_register ( SCI_WRAM, data ) ;
-}
-
-uint16_t VS1053::wram_read ( uint16_t address )
-{
-  write_register ( SCI_WRAMADDR, address ) ;            // Start reading from WRAM
-  return read_register ( SCI_WRAM ) ;                   // Read back result
-}
-
-bool VS1053::testComm ( const char *header )
-{
-  // Test the communication with the VS1053 module.  The result wille be returned.
-  // If DREQ is low, there is problably no VS1053 connected.  Pull the line HIGH
-  // in order to prevent an endless loop waiting for this signal.  The rest of the
-  // software will still work, but readbacks from VS1053 will fail.
-  int       i ;                                         // Loop control
-  uint16_t  r1, r2, cnt = 0 ;
-  uint16_t  delta = 300 ;                               // 3 for fast SPI
-
-  if ( !digitalRead ( dreq_pin ) )
-  {
-    dbgprint ( "VS1053 not properly installed!" ) ;
-    // Allow testing without the VS1053 module
-    pinMode ( dreq_pin,  INPUT_PULLUP ) ;               // DREQ is now input with pull-up
-    return false ;                                      // Return bad result
-  }
-  // Further TESTING.  Check if SCI bus can write and read without errors.
-  // We will use the volume setting for this.
-  // Will give warnings on serial output if DEBUG is active.
-  // A maximum of 20 errors will be reported.
-  if ( strstr ( header, "Fast" ) )
-  {
-    delta = 3 ;                                         // Fast SPI, more loops
-  }
-  dbgprint ( header ) ;                                 // Show a header
-  for ( i = 0 ; ( i < 0xFFFF ) && ( cnt < 20 ) ; i += delta )
-  {
-    write_register ( SCI_VOL, i ) ;                     // Write data to SCI_VOL
-    r1 = read_register ( SCI_VOL ) ;                    // Read back for the first time
-    r2 = read_register ( SCI_VOL ) ;                    // Read back a second time
-    if  ( r1 != r2 || i != r1 || i != r2 )              // Check for 2 equal reads
-    {
-      dbgprint ( "VS1053 error retry SB:%04X R1:%04X R2:%04X", i, r1, r2 ) ;
-      cnt++ ;
-      delay ( 10 ) ;
-    }
-    yield() ;                                           // Allow ESP firmware to do some bookkeeping
-  }
-  return ( cnt == 0 ) ;                                 // Return the result
-}
-
-void VS1053::begin()
-{
-  pinMode      ( dreq_pin,  INPUT ) ;                   // DREQ is an input
-  pinMode      ( cs_pin,    OUTPUT ) ;                  // The SCI and SDI signals
-  pinMode      ( dcs_pin,   OUTPUT ) ;
-  digitalWrite ( dcs_pin,   HIGH ) ;                    // Start HIGH for SCI en SDI
-  digitalWrite ( cs_pin,    HIGH ) ;
-  delay ( 100 ) ;
-  dbgprint ( "Reset VS1053..." ) ;
-  digitalWrite ( dcs_pin,   LOW ) ;                     // Low & Low will bring reset pin low
-  digitalWrite ( cs_pin,    LOW ) ;
-  delay ( 2000 ) ;
-  dbgprint ( "End reset VS1053..." ) ;
-  digitalWrite ( dcs_pin,   HIGH ) ;                    // Back to normal again
-  digitalWrite ( cs_pin,    HIGH ) ;
-  delay ( 500 ) ;
-  // Init SPI in slow mode ( 0.2 MHz )
-  VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
-  //printDetails ( "Right after reset/startup" ) ;
-  delay ( 20 ) ;
-  //printDetails ( "20 msec after reset" ) ;
-  testComm ( "Slow SPI,Testing VS1053 read/write registers..." ) ;
-  // Most VS1053 modules will start up in midi mode.  The result is that there is no audio
-  // when playing MP3.  You can modify the board, but there is a more elegant way:
-  wram_write ( 0xC017, 3 ) ;                            // GPIO DDR = 3
-  wram_write ( 0xC019, 0 ) ;                            // GPIO ODATA = 0
-  delay ( 100 ) ;
-  //printDetails ( "After test loop" ) ;
-  softReset() ;                                         // Do a soft reset
-  // Switch on the analog parts
-  write_register ( SCI_AUDATA, 44100 + 1 ) ;            // 44.1kHz + stereo
-  // The next clocksetting allows SPI clocking at 5 MHz, 4 MHz is safe then.
-  write_register ( SCI_CLOCKF, 6 << 12 ) ;              // Normal clock settings multiplyer 3.0 = 12.2 MHz
-  //SPI Clock to 4 MHz. Now you can set high speed SPI clock.
-  VS1053_SPI = SPISettings ( 4000000, MSBFIRST, SPI_MODE0 ) ;
-  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_LINE1 ) ) ;
-  testComm ( "Fast SPI, Testing VS1053 read/write registers again..." ) ;
-  delay ( 10 ) ;
-  await_data_request() ;
-  endFillByte = wram_read ( 0x1E06 ) & 0xFF ;
-  dbgprint ( "endFillByte is %X", endFillByte ) ;
-  //printDetails ( "After last clocksetting" ) ;
-  delay ( 100 ) ;
-}
-
-void VS1053::setVolume ( uint8_t vol )
-{
-  // Set volume.  Both left and right.
-  // Input value is 0..100.  100 is the loudest.
-  // Clicking reduced by using 0xf8 to 0x00 as limits.
-  uint16_t value ;                                      // Value to send to SCI_VOL
-
-  if ( vol != curvol )
-  {
-    curvol = vol ;                                      // Save for later use
-    value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
-    value = ( value << 8 ) | value ;
-    write_register ( SCI_VOL, value ) ;                 // Volume left and right
-  }
-}
-
-void VS1053::setTone ( uint8_t *rtone )                 // Set bass/treble (4 nibbles)
-{
-  // Set tone characteristics.  See documentation for the 4 nibbles.
-  uint16_t value = 0 ;                                  // Value to send to SCI_BASS
-  int      i ;                                          // Loop control
-
-  for ( i = 0 ; i < 4 ; i++ )
-  {
-    value = ( value << 4 ) | rtone[i] ;                 // Shift next nibble in
-  }
-  write_register ( SCI_BASS, value ) ;                  // Tone settings
-  value = read_register ( SCI_BASS ) ;                  // Read back
-  dbgprint ( "BASS settings is %04X", value ) ;         // Print for TEST
-}
-
-uint8_t VS1053::getVolume()                             // Get the currenet volume setting.
-{
-  return curvol ;
-}
-
-void VS1053::startSong()
-{
-  sdi_send_fillers ( 10 ) ;
-}
-
-void VS1053::playChunk ( uint8_t* data, size_t len )
-{
-  sdi_send_buffer ( data, len ) ;
-}
-
-void VS1053::stopSong()
-{
-  uint16_t modereg ;                     // Read from mode register
-  int      i ;                           // Loop control
-
-  sdi_send_fillers ( 2052 ) ;
-  delay ( 10 ) ;
-  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
-  for ( i = 0 ; i < 200 ; i++ )
-  {
-    sdi_send_fillers ( 32 ) ;
-    modereg = read_register ( SCI_MODE ) ;  // Read status
-    if ( ( modereg & _BV ( SM_CANCEL ) ) == 0 )
-    {
-      sdi_send_fillers ( 2052 ) ;
-      dbgprint ( "Song stopped correctly after %d msec", i * 10 ) ;
-      return ;
-    }
-    delay ( 10 ) ;
-  }
-  printDetails ( "Song stopped incorrectly!" ) ;
-}
-
-void VS1053::softReset()
-{
-  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_RESET ) ) ;
-  delay ( 10 ) ;
-  await_data_request() ;
-}
-
-void VS1053::printDetails ( const char *header )
-{
-  uint16_t     regbuf[16] ;
-  uint8_t      i ;
-
-  dbgprint ( header ) ;
-  dbgprint ( "REG   Contents" ) ;
-  dbgprint ( "---   -----" ) ;
-  for ( i = 0 ; i <= SCI_num_registers ; i++ )
-  {
-    regbuf[i] = read_register ( i ) ;
-  }
-  for ( i = 0 ; i <= SCI_num_registers ; i++ )
-  {
-    delay ( 5 ) ;
-    dbgprint ( "%3X - %5X", i, regbuf[i] ) ;
-  }
-}
-
-void VS1053::AdjustRate ( long ppm2 )
-{
-  write_register ( SCI_WRAMADDR, 0x1e07 ) ;
-  write_register ( SCI_WRAM,     ppm2 ) ;
-  write_register ( SCI_WRAM,     ppm2 >> 16 ) ;
-  // oldClock4KHz = 0 forces  adjustment calculation when rate checked.
-  write_register ( SCI_WRAMADDR, 0x5b1c ) ;
-  write_register ( SCI_WRAM,     0 ) ;
-  // Write to AUDATA or CLOCKF checks rate and recalculates adjustment.
-  write_register ( SCI_AUDATA,   read_register ( SCI_AUDATA ) ) ;
-}
-
 
 // The object for the MP3 player
 VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 
 
-#if defined ( USELCD )
+#if defined ( LCD )
 //***************************************************************************************************
 //*  LCD2004.h -- Driver for LCD 2004 display with I2C backpack.                                    *
 //***************************************************************************************************
@@ -1179,46 +798,51 @@ bool getLocalTime(struct tm * info, uint32_t ms)
 
 void gettime()
 {
-  static int16_t delaycount = 0 ;                         // To reduce number of NTP requests
+  static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
 
-  if ( timeinfo.tm_year )                                 // Legal time found?
+  #if defined ( LCD )
   {
-    sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
-              timeinfo.tm_hour,
-              timeinfo.tm_min,
-              timeinfo.tm_sec ) ;
-  }
-  if ( --delaycount <= 0 )                                // Sync every few hours
-  {
-    delaycount = 7200 ;                                   // Reset counter
-    if ( timeinfo.tm_year )                               // Legal time found?
+    if ( timeinfo.tm_year )                                 // Legal time found?
     {
-      dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
-    }
-    dbgprint ( "Sync TOD" ) ;
-    if ( !getLocalTime ( &timeinfo, 5000 ) )              // Read from NTP server
-    {
-      dbgprint ( "Failed to obtain time!" ) ;             // Error
-      timeinfo.tm_year = 0 ;                              // Set current time to illegal
-      if ( retrycount )                                   // Give up syncing?
-      {
-        retrycount-- ;                                    // No try again
-        delaycount = 5 ;                                  // Retry after 5 seconds
-      }
-    }
-    else
-    {
-      sprintf ( timetxt, "%02d:%02d:%02d",                // Format new time to a string
+      sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
                 timeinfo.tm_hour,
                 timeinfo.tm_min,
                 timeinfo.tm_sec ) ;
-      dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
+    }
+    if ( --delaycount <= 0 )                                // Sync every few hours
+    {
+      delaycount = 7200 ;                                   // Reset counter
+      if ( timeinfo.tm_year )                               // Legal time found?
+      {
+        dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
+      }
+      dbgprint ( "Sync TOD" ) ;
+      if ( !getLocalTime ( &timeinfo, 5000 ) )              // Read from NTP server
+      {
+        dbgprint ( "Failed to obtain time!" ) ;             // Error
+        timeinfo.tm_year = 0 ;                              // Set current time to illegal
+        if ( retrycount )                                   // Give up syncing?
+        {
+          retrycount-- ;                                    // No try again
+          delaycount = 5 ;                                  // Retry after 5 seconds
+        }
+      }
+      else
+      {
+        sprintf ( timetxt, "%02d:%02d:%02d",                // Format new time to a string
+                  timeinfo.tm_hour,
+                  timeinfo.tm_min,
+                  timeinfo.tm_sec ) ;
+        dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
+      }
     }
   }
+  #endif
 }
 
 
+#if defined ( SPIRAM )
 //******************************************************************************************
 // SPI RAM routines.                                                                       *
 //******************************************************************************************
@@ -1307,6 +931,7 @@ void spiramSetup()
   spiram.begin() ;                                  // Init ESP8266Spiram
   bufferReset() ;                                   // Reset ringbuffer administration
 }
+#endif
 
 
 //******************************************************************************************
@@ -1317,14 +942,11 @@ void spiramSetup()
 //******************************************************************************************
 inline bool ringspace()
 {
-  if ( usespiram )
-  {
+  #if defined ( SPIRAM )
     return spaceAvailable() ;         // True if at least 1 chunk available
-  }
-  else
-  {
+  #else
     return ( rcount < RINGBFSIZ ) ;   // True is at least one byte of free space is available
-  }
+  #endif
 }
 
 
@@ -1333,14 +955,11 @@ inline bool ringspace()
 //******************************************************************************************
 inline uint16_t ringavail()
 {
-  if ( usespiram )
-  {
+  #if defined ( SPIRAM )
     return dataAvailable() ;          // Return number of chunks filled
-  }
-  else
-  {
+  #else
     return rcount ;                   // Return number of bytes available
-  }
+  #endif
 }
 
 
@@ -1351,26 +970,22 @@ inline uint16_t ringavail()
 //******************************************************************************************
 void putring ( uint8_t b )              // Put one byte in the ringbuffer
 {
-  static uint8_t pwchunk[32] ;          // Buffer for one chunk
-
-  if ( usespiram )
-  {
+  #if defined ( SPIRAM )
+    static uint8_t pwchunk[32] ;        // Buffer for one chunk
     pwchunk[prcwinx++] = b ;            // Store in local chunk
     if ( prcwinx == sizeof(pwchunk) )   // Chunk full?
     {
       bufferWrite ( pwchunk ) ;         // Yes, store in SPI RAM
       prcwinx = 0 ;                     // Index to begin of chunk
     }
-  }
-  else
-  {
+  #else
     *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
     if ( ++rbwindex == RINGBFSIZ )      // Increment pointer and
     {
       rbwindex = 0 ;                    // wrap at end
     }
     rcount++ ;                          // Count number of bytes in the
-  }
+  #endif
 }
 
 
@@ -1381,26 +996,22 @@ void putring ( uint8_t b )              // Put one byte in the ringbuffer
 //******************************************************************************************
 uint8_t getring()
 {
-  static uint8_t prchunk[32] ;          // Buffer for one chunk
-
-  if ( usespiram )
-  {
-    if ( prcrinx >= sizeof(prchunk) )   // End of buffer reached?
+  #if defined ( SPIRAM )
+    static uint8_t prchunk[32] ;          // Buffer for one chunk
+    if ( prcrinx >= sizeof(prchunk) )     // End of buffer reached?
     {
-      prcrinx = 0 ;                     // Yes, reset index to begin of buffer
-      bufferRead ( prchunk ) ;          // And read new buffer
+      prcrinx = 0 ;                       // Yes, reset index to begin of buffer
+      bufferRead ( prchunk ) ;            // And read new buffer
     }
     return ( prchunk[prcrinx++] ) ;
-  }
-  else
-  {
-    if ( ++rbrindex == RINGBFSIZ )      // Increment pointer and
+  #else
+    if ( ++rbrindex == RINGBFSIZ )        // Increment pointer and
     {
-      rbrindex = 0 ;                    // wrap at end
+      rbrindex = 0 ;                      // wrap at end
     }
-    rcount-- ;                          // Count is now one less
-    return *(ringbuf + rbrindex) ;      // return the oldest byte
-  }
+    rcount-- ;                            // Count is now one less
+    return *(ringbuf + rbrindex) ;        // return the oldest byte
+  #endif
 }
 
 
@@ -1409,17 +1020,14 @@ uint8_t getring()
 //******************************************************************************************
 void emptyring()
 {
-  if ( usespiram )
-  {
+  #ifdef SPIRAM
     prcwinx = 0 ;
-    prcrinx = 32 ;                       // Set buffer to empty
-  }
-  else
-  {
-    rbwindex = 0 ;                      // Reset ringbuffer administration
+    prcrinx = 32 ;                        // Set buffer to empty
+  #else
+    rbwindex = 0 ;                        // Reset ringbuffer administration
     rbrindex = RINGBFSIZ - 1 ;
     rcount = 0 ;
-  }
+  #endif
 }
 
 
@@ -1678,16 +1286,19 @@ void testfile ( String fspec )
 void timer100()
 {
   static int     count10sec = 0 ;                 // Counter for activate 10 seconds process
-  static int     count1sec = 0 ;                  // Counter for 1 second
   uint16_t       v ;                              // Analog input value 0..1023
   static uint8_t aoldval = 0 ;                    // Previous value of analog input switch
   uint8_t        anewval ;                        // New value of analog input switch (0..3)
   uint8_t        oldvol ;
 
-  if ( ++count1sec == 10  )                       // 1 second passed?
+  if ( ++count10sec == 100  )                     // 10 seconds passed?
+  {
+    timer10sec() ;                                // Yes, do 10 second procedure
+    count10sec = 0 ;                              // Reset count
+  }
+  if ( ( count10sec % 10 ) == 0 )                 // 1 second passed?
   {
     scrollflag = true ;                           // Yes, request scroll of LCD
-    count1sec = 0 ;                               // Reset count
     if ( ++timeinfo.tm_sec >= 60 )                // Yes, update number of seconds
     {
       timeinfo.tm_sec = 0 ;                       // Wrap after 60 seconds
@@ -1701,12 +1312,6 @@ void timer100()
       }
     }
     time_req = true ;                             // Yes, show current time request
-  }
-
-  if ( ++count10sec == 100  )                     // 10 seconds passed?
-  {
-    timer10sec() ;                                // Yes, do 10 second procedure
-    count10sec = 0 ;                              // Reset count
   }
   else
   {
@@ -1734,7 +1339,7 @@ void timer100()
     }
   }
 // Check for and execute new IR remote control commands
-#if defined ( USEIR )
+#if defined ( IR )
   if (irrecv.decode(&decodedIRCommand))
   {
     dbgprint ("IR Command received");
@@ -1768,6 +1373,11 @@ void timer100()
     {
       muteflag = !muteflag;
       dbgprint ("IR Command: mute");
+    }
+    if (decodedIRCommand.value == IR_POWER)
+    {
+      analyzeCmd("reset");
+      dbgprint ("IR Command: reset");
     }
     if (decodedIRCommand.value == IR_PLAY)
     {
@@ -1845,7 +1455,7 @@ void showstreamtitle ( const char *ml, bool full )
 {
   char*             p1 ;
   char*             p2 ;
-  char              streamtitle[150] ;           // Streamtitle from metadata
+  char              streamtitle[150] ;          // Streamtitle from metadata
 
   if ( strstr ( ml, "StreamTitle=" ) )
   {
@@ -1972,6 +1582,7 @@ bool connecttohost()
                       String ( "Host: " ) +
                       hostwoext +
                       String ( "\r\n" ) +
+                      String ( "User-Agent: Esp-radio\r\n" ) +
                       String ( "Icy-MetaData:1\r\n" ) +
                       String ( "Connection: close\r\n\r\n" ) ) ;
     return true ;
@@ -2021,6 +1632,8 @@ bool connectwifi()
   WiFi.begin ( ini_block.ssid.c_str(),
                ini_block.passwd.c_str() ) ;            // Connect to selected SSID
   dbgprint ( "Try WiFi %s", ini_block.ssid.c_str() ) ; // Message to show during WiFi connect
+
+  //wifi_fpm_auto_sleep_set_in_null_mode ( NULL_MODE ) ; // Disable auto sleep mode
 
   if (  WiFi.waitForConnectResult() != WL_CONNECTED )  // Try to connect
   {
@@ -2563,15 +2176,12 @@ void setup()
   Serial.begin ( 115200 ) ;                            // For debug
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
-  if ( usespiram )                                     // Use SPI RAM?
-  {
+  #if defined ( SPIRAM )
     spiramSetup() ;                                    // Yes, do set-up
     emptyring() ;                                      // Empty the buffer
-  }
-  else
-  {
+  #else
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
-  }
+  #endif
   xml.init ( xmlbuffer, sizeof(xmlbuffer),             // Initilize XML stream.
              &XML_callback ) ;
   //memset ( &ini_block, 0, sizeof(ini_block) ) ;      // Init ini_block
@@ -2619,11 +2229,12 @@ void setup()
   dbgprint ( "Sketch size %d, free size %d",
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;
-#if defined ( USEIR )
+#if defined ( IR )
   irrecv.enableIRIn();                                 // Enable IR receiver
 #endif
-  vs1053player.begin() ;                               // Initialize VS1053 player
-#if defined ( USELCD )
+vs1053player.begin() ;                                 // Initialize VS1053 player
+vs1053player.loadDefaultVs1053Patches();               // Load default patch set for VS1053
+#if defined ( LCD )
   dsp_begin();
   displayinfo ( "      Esp-radio     ", 0 ) ;
   delay(10),
@@ -2681,23 +2292,23 @@ void setup()
   {
     gettime() ;                                        // Sync time
   }
-  if ( usespiram )
-  {
+  #if defined ( SPIRAM )
     dbgprint ( "Testing SPIRAM getring/putring" ) ;
-    for ( int i = 0 ; i < 96 ; i++ )                     // Test for 96 bytes, 3 chunks
+    for ( int i = 0 ; i < 96 ; i++ )                    // Test for 96 bytes, 3 chunks
     {
       putring ( i ) ;                                    // Store in spiram
       dbgprint ( "Test 1: %d, chunks avl is %d",         // Test, expect 0,0 1,0 2,0 .... 95,3
                 i, ringavail() ) ;
     }
-    for ( int i = 0 ; i < 96 ; i++ )                     // Test for 100 bytes
+    for ( int i = 0 ; i < 96 ; i++ )                    // Test for 100 bytes
     {
       uint8_t c = getring() ;                            // Read from spiram
       dbgprint ( "Test 2: %d, data is %d, ch av is %d",  // Test, expect 0,0,2 1,1,2 2,2,2 .... 95,95,0
                 i, c, ringavail() ) ;
     }
-    dbgprint ( "Chunks avl is %d", ringavail() ) ;       // Test, expect 0
-  }
+    dbgprint ( "Chunks avl is %d",                       // Test, expect 0
+              ringavail() ) ;
+  #endif
 }
 
 
@@ -2753,11 +2364,13 @@ void loop()
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
-    if ( usespiram && ( spiramdelay != 0 ) )           // Delay before reading SPIRAM?
-    {
-      spiramdelay-- ;                                  // Yes, count down
-      break ;                                          // and skip handling of data
-    }
+    #if defined ( SPIRAM )
+      if ( spiramdelay != 0 )                          // Delay before reading SPIRAM?
+      {
+        spiramdelay-- ;                                // Yes, count down
+        break ;                                        // and skip handling of data
+      }
+    #endif
     handlebyte_ch ( getring() ) ;                      // Yes, handle it
   }
   yield() ;
@@ -2800,103 +2413,103 @@ void loop()
     }
     else
     {
-      if ( playlist_num )                               // Playing from playlist?
+      if ( playlist_num )                              // Playing from playlist?
       { // Yes, retrieve URL of playlist
         playlist_num += ini_block.newpreset -
-                        currentpreset ;                 // Next entry in playlist
-        ini_block.newpreset = currentpreset ;           // Stay at current preset
+                        currentpreset ;                // Next entry in playlist
+        ini_block.newpreset = currentpreset ;          // Stay at current preset
       }
       else
       {
-        host = readhostfrominifile(ini_block.newpreset) ; // Lookup preset in ini-file
+        host = readhostfrominifile ( ini_block.newpreset ) ; // Lookup preset in ini-file
       }
       dbgprint ( "New preset/file requested (%d/%d) from %s",
                  currentpreset, playlist_num, host.c_str() ) ;
-      if ( host != ""  )                                // Preset in ini-file?
+      if ( host != ""  )                               // Preset in ini-file?
       {
-        hostreq = true ;                                // Force this station as new preset
+        hostreq = true ;                               // Force this station as new preset
       }
       else
       {
         // This preset is not available, return to preset 0, will be handled in next loop()
-        ini_block.newpreset = 0 ;                       // Wrap to first station
+        ini_block.newpreset = 0 ;                      // Wrap to first station
       }
     }
   }
-  if ( hostreq )                                        // New preset or station?
+  if ( hostreq )                                       // New preset or station?
   {
     hostreq = false ;
-    currentpreset = ini_block.newpreset ;               // Remember current preset
+    currentpreset = ini_block.newpreset ;              // Remember current preset
     
-    localfile = host.startsWith ( "localhost/" ) ;      // Find out if this URL is on localhost
-    if ( localfile )                                    // Play file from localhost?
+    localfile = host.startsWith ( "localhost/" ) ;     // Find out if this URL is on localhost
+    if ( localfile )                                   // Play file from localhost?
     {
-      if ( connecttofile() )                            // Yes, open mp3-file
+      if ( connecttofile() )                           // Yes, open mp3-file
       {
-        datamode = DATA ;                               // Start in DATA mode
+        datamode = DATA ;                              // Start in DATA mode
       }
     }
     else
     {
-      if ( host.startsWith ( "ihr/" ) )                 // iHeartRadio station requested?
+      if ( host.startsWith ( "ihr/" ) )                // iHeartRadio station requested?
       {
-        host = host.substring ( 4 ) ;                   // Yes, remove "ihr/"
-        host = xmlparse ( host ) ;                      // Parse the xml to get the host
+        host = host.substring ( 4 ) ;                  // Yes, remove "ihr/"
+        host = xmlparse ( host ) ;                     // Parse the xml to get the host
       }
-      connecttohost() ;                                 // Switch to new host
+      connecttohost() ;                                // Switch to new host
     }
   }
-  if ( xmlreq )                                         // Directly xml requested?
+  if ( xmlreq )                                        // Directly xml requested?
   {
-    xmlreq = false ;                                    // Yes, clear request flag
-    host = xmlparse ( host ) ;                          // Parse the xml to get the host
-    connecttohost() ;                                   // and connect to this host
+    xmlreq = false ;                                   // Yes, clear request flag
+    host = xmlparse ( host ) ;                         // Parse the xml to get the host
+    connecttohost() ;                                  // and connect to this host
   }
-  if ( reqtone )                                        // Request to change tone?
+  if ( reqtone )                                       // Request to change tone?
   {
     reqtone = false ;
-    vs1053player.setTone ( ini_block.rtone ) ;          // Set SCI_BASS to requested value
+    vs1053player.setTone ( ini_block.rtone ) ;         // Set SCI_BASS to requested value
   }
-  if ( resetreq )                                       // Reset requested?
+  if ( resetreq )                                      // Reset requested?
   {
-    delay ( 1000 ) ;                                    // Yes, wait some time
-    ESP.restart() ;                                     // Reboot
+    delay ( 1000 ) ;                                   // Yes, wait some time
+    ESP.restart() ;                                    // Reboot
   }
   if ( muteflag )
   {
-    vs1053player.setVolume ( 0 ) ;                      // Mute
+    vs1053player.setVolume ( 0 ) ;                     // Mute
   }
   else
   {
-    vs1053player.setVolume ( ini_block.reqvol ) ;       // Unmute
+    vs1053player.setVolume ( ini_block.reqvol ) ;      // Unmute
   }
-  if ( testfilename.length() )                          // File to test?
+  if ( testfilename.length() )                         // File to test?
   {
-    testfile ( testfilename ) ;                         // Yes, do the test
-    testfilename = "" ;                                 // Clear test request
+    testfile ( testfilename ) ;                        // Yes, do the test
+    testfilename = "" ;                                // Clear test request
   }
-  if ( time_req && NetworkFound )                       // Time to refresh time?
+  if ( time_req && NetworkFound )                      // Time to refresh time?
   {
-    gettime() ;                                         // Yes, get the current time
+    gettime() ;                                        // Yes, get the current time
   }
-  #if defined ( USELCD )
-  if ( time_req )                                       // Time to refresh timetxt?
-  {
-    time_req = false ;                                  // Yes, clear request
-    if ( NetworkFound )                                 // Time available?
+  #if defined ( LCD )
+    if ( time_req )                                    // Time to refresh timetxt?
     {
-      displaytime ( timetxt ) ;                         // Write to TFT screen
-      displayvolume() ;                                 // Show volume on display
+      time_req = false ;                               // Yes, clear request
+      if ( NetworkFound )                              // Time available?
+      {
+        displaytime ( timetxt ) ;                      // Write to TFT screen
+        displayvolume() ;                              // Show volume on display
+      }
     }
-  }
-  if ( scrollflag )                                     // Time to scroll?
-  {
-    scrollflag = false ;                                // Yes, reset flag
-    dsp_update() ;                                      // LCD scroll
-  }
+    if ( scrollflag )                                  // Time to scroll?
+    {
+      dsp_update() ;                                   // LCD scroll
+      scrollflag = false ;                             // Yes, reset flag
+    }
   #endif
-  scanserial() ;                                        // Handle serial input
-  ArduinoOTA.handle() ;                                 // Check for OTA
+  scanserial() ;                                       // Handle serial input
+  ArduinoOTA.handle() ;                                // Check for OTA
 }
 
 
@@ -2907,27 +2520,27 @@ void loop()
 //**************************************************************************************************
 String decode_spec_chars ( String str )
 {
-  int    inx, inx2 ;                                // Indexes in string
-  char   c ;                                        // Character from string
-  char   val ;                                      // Converted character
+  int    inx, inx2 ;                                  // Indexes in string
+  char   c ;                                          // Character from string
+  char   val ;                                        // Converted character
   String res = str ;
 
-  while ( ( inx = res.indexOf ( "&#" ) ) >= 0 )     // Start sequence in string?
+  while ( ( inx = res.indexOf ( "&#" ) ) >= 0 )       // Start sequence in string?
   {
-    inx2 = res.indexOf ( ";", inx ) ;               // Yes, search for stop character
-    if ( inx2 < 0 )                                 // Stop character found
+    inx2 = res.indexOf ( ";", inx ) ;                 // Yes, search for stop character
+    if ( inx2 < 0 )                                   // Stop character found
     {
-      break ;                                       // Malformed string
+      break ;                                         // Malformed string
     }
-    res = str.substring ( 0, inx ) ;                // First part
-    inx += 2 ;                                      // skip over start sequence
-    val = 0 ;                                       // Init result of 
-    while ( ( c = str[inx++] ) != ';' )             // Convert character
+    res = str.substring ( 0, inx ) ;                  // First part
+    inx += 2 ;                                        // skip over start sequence
+    val = 0 ;                                         // Init result of 
+    while ( ( c = str[inx++] ) != ';' )               // Convert character
     {
       val = val * 10 + c - '0' ;
     }
-    res += ( String ( val ) +                       // Add special char to string
-             str.substring ( ++inx2 ) ) ;           // Add rest of string
+    res += ( String ( val ) +                         // Add special char to string
+             str.substring ( ++inx2 ) ) ;             // Add rest of string
   }
   return res ;
 }
@@ -3033,12 +2646,14 @@ void handlebyte ( uint8_t b, bool force )
   String           lcml ;                              // Lower case metaline
   String           ct ;                                // Contents type
   static bool      ctseen = false ;                    // First line of header seen or not
+  static bool      redirection = false ;               // Redirection or not
   int              inx ;                               // Pointer in metaline
   int              i ;                                 // Loop control
 
   if ( datamode == INIT )                              // Initialize for header receive
   {
     ctseen = false ;                                   // Contents type not seen yet
+    redirection = false ;                              // No redirect yet
     metaint = 0 ;                                      // No metaint found
     LFcount = 0 ;                                      // For detection end of header
     bitrate = 0 ;                                      // Bitrate still unknown
@@ -3099,6 +2714,19 @@ void handlebyte ( uint8_t b, bool force )
         lcml = metaline ;                              // Use lower case for compare
         lcml.toLowerCase() ;
         dbgprint ( metaline.c_str() ) ;                // Yes, Show it
+        if ( lcml.startsWith ( "location: " ) )        // Redirection?
+        {
+          redirection = true ;
+          if ( lcml.indexOf ( "http://" ) > 8 )        // Redirection with http://?
+          {
+            host = metaline.substring ( 17 ) ;         // Yes, get new URL
+          }
+          else if ( lcml.indexOf ( "https://" ) )      // Redirection with ttps://?
+          {
+            host = metaline.substring ( 18 ) ;         // Yes, get new URL
+          }
+          hostreq = true ;
+        }
         if ( lcml.indexOf ( "content-type" ) >= 0 )    // Line with "Content-Type: xxxx/yyy"
         {
           ctseen = true ;                              // Yes, remember seeing this
@@ -3135,15 +2763,28 @@ void handlebyte ( uint8_t b, bool force )
         }
       }
       metaline = "" ;                                  // Reset this line
-      if ( ( LFcount == 2 ) && ctseen )                // Some data seen and a double LF?
+      if ( LFcount == 2 )                              // Double linfeed ends header
       {
-        dbgprint ( "Switch to DATA, bitrate is %d"     // Show bitrate
-                   ", metaint is %d",                  // and metaint
-                   bitrate, metaint ) ;
-        datamode = DATA ;                              // Expecting data now
-        datacount = metaint ;                          // Number of bytes before first metadata
         bufcnt = 0 ;                                   // Reset buffer count
-        vs1053player.startSong() ;                     // Start a new song
+        if ( ctseen )                                  // Some data seen and a double LF?
+        {
+          dbgprint ( "Switch to DATA, bitrate is %d"   // Show bitrate
+                      ", metaint is %d",               // and metaint
+                    bitrate, metaint ) ;
+          datamode = DATA ;                            // Expecting data now
+          #if defined ( SPIRAM )
+            spiramdelay = SPIRAMDELAY ;                // Start delay
+          #endif
+          //emptyring() ;                              // Empty SPIRAM buffer (not sure about this)
+          datacount = metaint ;                        // Number of bytes before first metadata
+          bufcnt = 0 ;                                 // Reset buffer count
+          vs1053player.switchToMp3Mode() ;
+          vs1053player.startSong() ;                   // Start a new song
+        }
+        if ( redirection )                             // Redirect seen?
+        {
+           datamode = INIT ;
+        }
       }
     }
     else
@@ -3658,12 +3299,19 @@ char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-    if ( usespiram )                                  // SPI RAM use?
-    {
+    #if defined ( SPIRAM )                            // SPI RAM use?         
       rcount = dataAvailable() ;                      // Yes, get free space
-    }
-    sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
+    #endif
+    if ( mp3client )
+    {
+      sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
               system_get_free_heap_size(), rcount, mp3client->available(), bitrate ) ;
+    }
+    else
+    {
+      sprintf ( reply, "Free memory is %d, ringbuf %d, No stream available",
+              system_get_free_heap_size(), rcount ) ;      
+    }
   }
   // Commands for bass/treble control
   else if ( argument.startsWith ( "tone" ) )          // Tone command
@@ -3690,7 +3338,7 @@ char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "rate" )                      // Rate command?
   {
-    vs1053player.AdjustRate ( ivalue ) ;              // Yes, adjust
+    vs1053player.adjustRate ( ivalue ) ;              // Yes, adjust
   }
   else if ( argument.startsWith ( "mqtt" ) )          // Parameter fo MQTT?
   {
