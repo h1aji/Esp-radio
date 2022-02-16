@@ -4,7 +4,7 @@
 //************************************************************************************************
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sun, 11 Feb 2022 12:10:00 GMT"
+#define VERSION "Wed, 16 Feb 2022 12:10:00 GMT"
 //
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
@@ -42,7 +42,7 @@ extern "C"
 #define VS1053_DREQ   10
 //
 // Use 23LC1024 SPI RAM as ringbuffer. CS pin is connected to GPIO 15
-#define SPIRAM
+//#define SPIRAM
 #if defined ( SPIRAM )
   // Full size of 23LC1024 chip is 131072 bytes
   #define RINGBFSIZ         40000
