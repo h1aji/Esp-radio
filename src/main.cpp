@@ -37,27 +37,15 @@ extern "C"
 //
 // Digital I/O used
 // Pins for VS1053 module
-#define VS1053_CS     15
+#define VS1053_CS     2
 #define VS1053_DCS    16
-#define VS1053_DREQ   2
+#define VS1053_DREQ   10
 //
-// Use SPIRAM as ringbuffer
-//#define SPIRAM
+// Use 23LC1024 SPI RAM as ringbuffer. CS pin is connected to GPIO 15
+#define SPIRAM
 #if defined ( SPIRAM )
-  // SPI RAM settings
-  #include <ESP8266Spiram.h>
-  // GPIO 1O CS pin
-  #define SRAM_CS           10
-  // 23LC1024 supports theorically up to 20MHz
-  #define SRAM_FREQ         16e6
-  // Total size SPI ram in bytes
-  #define SRAM_SIZE         131072
-  // Chunk size
-  #define CHUNKSIZE         32
-  // Total size SPI ram in chunks
-  #define SRAM_CH_SIZE      4096
-  // Delay (in bytes) before reading from SPIRAM
-  #define SPIRAMDELAY       200000
+  // Full size of 23LC1024 chip is 131072 bytes
+  #define RINGBFSIZ         40000
 #else
   // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
   #define RINGBFSIZ         20000
@@ -86,7 +74,7 @@ extern "C"
 #define LCD
 #if defined ( LCD )
   #include <Wire.h>
-  // Pins for LCD 2004
+  // SDA SCL pins for LCD 2004
   #define SDA_PIN     4
   #define SCL_PIN     5
   // Adjust for your display
@@ -254,18 +242,9 @@ bool             localfile = false ;                       // Play from local mp
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
 uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
-#if defined ( SPIRAM )
-  uint16_t       chcount ;                                 // Number of chunks currently in buffer
-  uint32_t       readinx ;                                 // Read index
-  uint32_t       writeinx ;                                // write index
-  uint8_t        prcwinx ;                                 // Index in pwchunk (see putring)
-  uint8_t        prcrinx ;                                 // Index in prchunk (see getring)
-  int32_t        spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
-#else
-  uint8_t*       ringbuf ;                                 // Ringbuffer for VS1053
-  uint16_t       rbwindex = 0 ;                            // Fill pointer in ringbuffer
-  uint16_t       rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
-#endif
+uint8_t*         ringbuf ;                                 // Ringbuffer for VS1053
+uint16_t         rbwindex = 0 ;                            // Fill pointer in ringbuffer
+uint16_t         rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
 bool             scrollflag = false ;                      // Request to scroll LCD
 struct tm        timeinfo ;                                // Will be filled by NTP server
 char             timetxt[9] ;                              // Converted timeinfo
@@ -842,98 +821,6 @@ void gettime()
 }
 
 
-#if defined ( SPIRAM )
-//******************************************************************************************
-// SPI RAM routines.                                                                       *
-//******************************************************************************************
-// Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
-//******************************************************************************************
-
-ESP8266Spiram spiram ( SRAM_CS, SRAM_FREQ ) ;
-
-//******************************************************************************************
-//                              S P A C E A V A I L A B L E                                *
-//******************************************************************************************
-// Returns true if bufferspace is available.                                               *
-//******************************************************************************************
-bool spaceAvailable()
-{
-  return ( chcount < SRAM_CH_SIZE ) ;
-}
-
-
-//******************************************************************************************
-//                              D A T A A V A I L A B L E                                  *
-//******************************************************************************************
-// Returns the number of full chunks available in the buffer.                              *
-//******************************************************************************************
-uint16_t dataAvailable()
-{
-  return chcount ;
-}
-
-
-//******************************************************************************************
-//                    G E T F R E E B U F F E R S P A C E                                  *
-//******************************************************************************************
-// Return the free buffer space in chunks.                                                 *
-//******************************************************************************************
-uint16_t getFreeBufferSpace()
-{
-  return ( SRAM_CH_SIZE - chcount ) ;                // Return number of chuinks available
-}
-
-
-//******************************************************************************************
-//                             B U F F E R W R I T E                                       *
-//******************************************************************************************
-// Write one chunk (32 bytes) to SPI RAM.                                                  *
-// No check on available space.  See spaceAvailable().                                     *
-//******************************************************************************************
-void bufferWrite ( uint8_t *b )
-{
-  spiram.write ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ; // Put byte in SRAM
-  writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
-  chcount++ ;                                           // Count number of chunks
-}
-
-
-//******************************************************************************************
-//                             B U F F E R R E A D                                         *
-//******************************************************************************************
-// Read one chunk in the user buffer.                                                      *
-// Assume there is always something in the bufferpace.  See dataAvailable()                *
-//******************************************************************************************
-void bufferRead ( uint8_t *b )
-{
-  spiram.read ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // return next chunk
-  readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
-  chcount-- ;                                          // Count is now one less
-}
-
-
-//******************************************************************************************
-//                            B U F F E R R E S E T                                        *
-//******************************************************************************************
-void bufferReset()
-{
-  readinx = 0 ;                                     // Reset ringbuffer administration
-  writeinx = 0 ;
-  chcount = 0 ;
-}
-
-
-//******************************************************************************************
-//                                S P I R A M S E T U P                                    *
-//******************************************************************************************
-void spiramSetup()
-{
-  spiram.begin() ;                                  // Init ESP8266Spiram
-  bufferReset() ;                                   // Reset ringbuffer administration
-}
-#endif
-
-
 //******************************************************************************************
 // Ringbuffer (fifo) routines.                                                             *
 //******************************************************************************************
@@ -942,11 +829,7 @@ void spiramSetup()
 //******************************************************************************************
 inline bool ringspace()
 {
-  #if defined ( SPIRAM )
-    return spaceAvailable() ;         // True if at least 1 chunk available
-  #else
-    return ( rcount < RINGBFSIZ ) ;   // True is at least one byte of free space is available
-  #endif
+    return ( rcount < RINGBFSIZ ) ;  // True is at least one byte of free space is available
 }
 
 
@@ -955,11 +838,7 @@ inline bool ringspace()
 //******************************************************************************************
 inline uint16_t ringavail()
 {
-  #if defined ( SPIRAM )
-    return dataAvailable() ;          // Return number of chunks filled
-  #else
-    return rcount ;                   // Return number of bytes available
-  #endif
+  return rcount ;                        // Return number of bytes available
 }
 
 
@@ -968,24 +847,14 @@ inline uint16_t ringavail()
 //******************************************************************************************
 // No check on available space.  See ringspace()                                           *
 //******************************************************************************************
-void putring ( uint8_t b )              // Put one byte in the ringbuffer
+void putring ( uint8_t b )                // Put one byte in the ringbuffer
 {
-  #if defined ( SPIRAM )
-    static uint8_t pwchunk[32] ;        // Buffer for one chunk
-    pwchunk[prcwinx++] = b ;            // Store in local chunk
-    if ( prcwinx == sizeof(pwchunk) )   // Chunk full?
-    {
-      bufferWrite ( pwchunk ) ;         // Yes, store in SPI RAM
-      prcwinx = 0 ;                     // Index to begin of chunk
-    }
-  #else
-    *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
-    if ( ++rbwindex == RINGBFSIZ )      // Increment pointer and
-    {
-      rbwindex = 0 ;                    // wrap at end
-    }
-    rcount++ ;                          // Count number of bytes in the
-  #endif
+  *(ringbuf + rbwindex) = b ;             // Put byte in ringbuffer
+  if ( ++rbwindex == RINGBFSIZ )          // Increment pointer and
+  {
+    rbwindex = 0 ;                        // wrap at end
+  }
+  rcount++ ;                              // Count number of bytes in the
 }
 
 
@@ -996,22 +865,12 @@ void putring ( uint8_t b )              // Put one byte in the ringbuffer
 //******************************************************************************************
 uint8_t getring()
 {
-  #if defined ( SPIRAM )
-    static uint8_t prchunk[32] ;          // Buffer for one chunk
-    if ( prcrinx >= sizeof(prchunk) )     // End of buffer reached?
-    {
-      prcrinx = 0 ;                       // Yes, reset index to begin of buffer
-      bufferRead ( prchunk ) ;            // And read new buffer
-    }
-    return ( prchunk[prcrinx++] ) ;
-  #else
-    if ( ++rbrindex == RINGBFSIZ )        // Increment pointer and
-    {
-      rbrindex = 0 ;                      // wrap at end
-    }
-    rcount-- ;                            // Count is now one less
-    return *(ringbuf + rbrindex) ;        // return the oldest byte
-  #endif
+  if ( ++rbrindex == RINGBFSIZ )          // Increment pointer and
+  {
+    rbrindex = 0 ;                        // wrap at end
+  }
+  rcount-- ;                              // Count is now one less
+  return *(ringbuf + rbrindex) ;          // return the oldest byte
 }
 
 
@@ -1020,14 +879,9 @@ uint8_t getring()
 //******************************************************************************************
 void emptyring()
 {
-  #ifdef SPIRAM
-    prcwinx = 0 ;
-    prcrinx = 32 ;                        // Set buffer to empty
-  #else
-    rbwindex = 0 ;                        // Reset ringbuffer administration
-    rbrindex = RINGBFSIZ - 1 ;
-    rcount = 0 ;
-  #endif
+  rbwindex = 0 ;                          // Reset ringbuffer administration
+  rbrindex = RINGBFSIZ - 1 ;
+  rcount = 0 ;
 }
 
 
@@ -1143,7 +997,7 @@ void listNetworks()
 //******************************************************************************************
 void timer10sec()
 {
-  static uint32_t oldtotalcount = 7321 ;          // Needed foor change detection
+  static uint32_t oldtotalcount = 7321 ;          // Needed for change detection
   static uint8_t  morethanonce = 0 ;              // Counter for succesive fails
   static uint8_t  t600 = 0 ;                      // Counter for 10 minutes
 
@@ -2177,8 +2031,11 @@ void setup()
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
   #if defined ( SPIRAM )
-    spiramSetup() ;                                    // Yes, do set-up
-    emptyring() ;                                      // Empty the buffer
+    ESP.setExternalHeap();                             // Set external memory to use
+    ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
+    dbgprint ( "External buffer: Address %p, free %d\n", 
+                    ringbuf, ESP.getFreeHeap() ) ;
+    ESP.resetHeap();
   #else
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
   #endif
@@ -2364,13 +2221,6 @@ void loop()
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
-    #if defined ( SPIRAM )
-      if ( spiramdelay != 0 )                          // Delay before reading SPIRAM?
-      {
-        spiramdelay-- ;                                // Yes, count down
-        break ;                                        // and skip handling of data
-      }
-    #endif
     handlebyte_ch ( getring() ) ;                      // Yes, handle it
   }
   yield() ;
@@ -2772,9 +2622,6 @@ void handlebyte ( uint8_t b, bool force )
                       ", metaint is %d",               // and metaint
                     bitrate, metaint ) ;
           datamode = DATA ;                            // Expecting data now
-          #if defined ( SPIRAM )
-            spiramdelay = SPIRAMDELAY ;                // Start delay
-          #endif
           //emptyring() ;                              // Empty SPIRAM buffer (not sure about this)
           datacount = metaint ;                        // Number of bytes before first metadata
           bufcnt = 0 ;                                 // Reset buffer count
@@ -3299,9 +3146,6 @@ char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-    #if defined ( SPIRAM )                            // SPI RAM use?         
-      rcount = dataAvailable() ;                      // Yes, get free space
-    #endif
     if ( mp3client )
     {
       sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
