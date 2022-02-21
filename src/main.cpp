@@ -42,13 +42,13 @@ extern "C"
 #define VS1053_DREQ   10
 //
 // Use 23LC1024 SPI RAM as ringbuffer. CS pin is connected to GPIO 15
-//#define SPIRAM
+#define SPIRAM
 #if defined ( SPIRAM )
   // Full size of 23LC1024 chip is 131072 bytes
   #define RINGBFSIZ         40000
 #else
   // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-  #define RINGBFSIZ         20000
+  #define RINGBFSIZ         18000
 #endif
 //
 // Debug buffer size
@@ -74,41 +74,11 @@ extern "C"
 #define LCD
 #if defined ( LCD )
   #include <Wire.h>
-  // SDA SCL pins for LCD 2004
+  // SDA and SCL pins for LCD 2004
   #define SDA_PIN     4
   #define SCL_PIN     5
   // Adjust for your display
   #define I2C_ADDRESS 0x27
-  // Enable ACK for I2C communication
-  #define ACKENA      true
-  //
-  #define DELAY_ENABLE_PULSE_SETTLE           50               // Command requires > 37us to settle
-  #define FLAG_BACKLIGHT_ON                   0b00001000       // Bit 3, backlight enabled (disabled if clear)
-  #define FLAG_ENABLE                         0b00000100       // Bit 2, Enable
-  #define FLAG_RS_DATA                        0b00000001       // Bit 0, RS=data (command if clear)
-  #define FLAG_RS_COMMAND                     0b00000000       // Command
-  //
-  #define COMMAND_CLEAR_DISPLAY               0x01
-  #define COMMAND_RETURN_HOME                 0x02
-  #define COMMAND_ENTRY_MODE_SET              0x04
-  #define COMMAND_DISPLAY_CONTROL             0x08
-  #define COMMAND_FUNCTION_SET                0x20
-  #define COMMAND_SET_DDRAM_ADDR              0x80
-  //
-  #define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
-  #define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
-  //
-  #define FLAG_FUNCTION_SET_MODE_4BIT         0x00
-  #define FLAG_FUNCTION_SET_LINES_2           0x08
-  #define FLAG_FUNCTION_SET_DOTS_5X8          0x00
-  //
-  #define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
-  #define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
-  //
-  #define dsp_print(a)                                         // Print a string 
-  #define dsp_setCursor(a,b)                                   // Position the cursor
-  #define dsp_getwidth()                      20               // Get width of screen
-  #define dsp_getheight()                     4                // Get height of screen
 #endif
 //
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
@@ -302,6 +272,37 @@ VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 //***************************************************************************************************
 //
 // Note that the display function are limited due to the minimal available space.
+//
+#define ACKENA true                                          // Enable ACK for I2C communication
+//
+#define DELAY_ENABLE_PULSE_SETTLE           50               // Command requires > 37us to settle
+#define FLAG_BACKLIGHT_ON                   0b00001000       // Bit 3, backlight enabled (disabled if clear)
+#define FLAG_ENABLE                         0b00000100       // Bit 2, Enable
+#define FLAG_RS_DATA                        0b00000001       // Bit 0, RS=data (command if clear)
+#define FLAG_RS_COMMAND                     0b00000000       // Command
+//
+#define COMMAND_CLEAR_DISPLAY               0x01
+#define COMMAND_RETURN_HOME                 0x02
+#define COMMAND_ENTRY_MODE_SET              0x04
+#define COMMAND_DISPLAY_CONTROL             0x08
+#define COMMAND_FUNCTION_SET                0x20
+#define COMMAND_SET_DDRAM_ADDR              0x80
+//
+#define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
+#define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
+//
+#define FLAG_FUNCTION_SET_MODE_4BIT         0x00
+#define FLAG_FUNCTION_SET_LINES_2           0x08
+#define FLAG_FUNCTION_SET_DOTS_5X8          0x00
+//
+#define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
+#define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
+//
+#define dsp_print(a)                                         // Print a string 
+#define dsp_setCursor(a,b)                                   // Position the cursor
+#define dsp_getwidth()                      20               // Get width of screen
+#define dsp_getheight()                     4                // Get height of screen
+
 
 class LCD2004
 {
@@ -347,10 +348,10 @@ bool dsp_begin()
 //***********************************************************************************************
 // Write functins for command, data and general.                                                *
 //***********************************************************************************************
-void LCD2004::swrite ( uint8_t val, uint8_t rs )          // General write, 8 bits data
+void LCD2004::swrite ( uint8_t val, uint8_t rs )           // General write, 8 bits data
 {
-  strobe ( ( val & 0xf0 ) | rs ) ;                        // Send 4 LSB bits
-  strobe ( ( val << 4 ) | rs ) ;                          // Send 4 MSB bits
+  strobe ( ( val & 0xf0 ) | rs ) ;                         // Send 4 LSB bits
+  strobe ( ( val << 4 ) | rs ) ;                           // Send 4 MSB bits
 }
 
 
@@ -373,9 +374,9 @@ void LCD2004::write_cmd ( uint8_t val )
 //***********************************************************************************************
 void LCD2004::strobe ( uint8_t cmd )
 {
-  scommand ( cmd | FLAG_ENABLE ) ;                  // Send command with E high
-  scommand ( cmd ) ;                                // Same command with E low
-  delayMicroseconds ( DELAY_ENABLE_PULSE_SETTLE ) ; // Wait a short time
+  scommand ( cmd | FLAG_ENABLE ) ;                         // Send command with E high
+  scommand ( cmd ) ;                                       // Same command with E low
+  delayMicroseconds ( DELAY_ENABLE_PULSE_SETTLE ) ;        // Wait a short time
 }
 
 
@@ -494,13 +495,14 @@ void LCD2004::reset()
 LCD2004::LCD2004 ( uint8_t sda, uint8_t scl )
 {
   Wire.begin ( sda, scl ) ;
-  delay(10);
-  Wire.setClock ( 100000UL ) ;                        //experimental! ESP8266 i2c bus speed: 100kHz..400kHz/100000UL..400000UL, default 100000UL
-  Wire.setClockStretchLimit ( 230 ) ;                 //experimental! default 230
+  delay ( 10 ) ;
+  Wire.setClock ( 100000UL ) ;                        // Experimental! ESP8266 i2c bus speed: 
+                                                      // 100kHz..400kHz/100000UL..400000UL, default 100000UL
+  Wire.setClockStretchLimit ( 230 ) ;                 // Experimental! default 230
   Wire.beginTransmission ( I2C_ADDRESS ) ;
   if ( Wire.endTransmission() != 0 )
   {
-    dbgprint ( "LCD2004 connection error!" ) ;        //safety check, make sure the PCF8574 is connected
+    dbgprint ( "LCD2004 connection error!" ) ;        // Safety check, make sure the PCF8574 is connected
   }
   reset() ;
 }
@@ -748,8 +750,8 @@ void displayinfo ( const char *str, int pos )
   dsp_update_line ( pos ) ;                     // Show on display
 }
 #else
-#define displayinfo(a,b)                        // Empty declaration
-#define displaytime(a)
+  #define displayinfo(a,b)                      // Empty declaration
+  #define displaytime(a)
 #endif
 
 
@@ -759,28 +761,28 @@ void displayinfo ( const char *str, int pos )
 // Retrieve the local time from NTP server and convert to string.                                  *
 // Will be called every second.                                                                    *
 //**************************************************************************************************
-bool getLocalTime(struct tm * info, uint32_t ms)
+bool getLocalTime ( struct tm * info, uint32_t ms )
 {
     uint32_t start = millis();
     time_t now;
-    while((millis()-start) <= ms) {
-        time(&now);
-        localtime_r(&now, info);
-        if(info->tm_year > (2016 - 1900))
-        {
-            return true;
-        }
-        delay(10);
+    while ( ( millis()-start ) <= ms )
+    {
+      time ( &now ) ;
+      localtime_r ( &now, info ) ;
+      if ( info->tm_year > ( 2016 - 1900 ) )
+      {
+        return true;
+      }
+        delay ( 10 ) ;
     }
     return false;
 }
 
 void gettime()
 {
+  #if defined ( LCD )
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
-
-  #if defined ( LCD )
   {
     if ( timeinfo.tm_year )                                 // Legal time found?
     {
@@ -829,7 +831,7 @@ void gettime()
 //******************************************************************************************
 inline bool ringspace()
 {
-    return ( rcount < RINGBFSIZ ) ;  // True is at least one byte of free space is available
+  return ( rcount < RINGBFSIZ ) ;    // True is at least one byte of free space is available
 }
 
 
@@ -852,7 +854,7 @@ void putring ( uint8_t b )                // Put one byte in the ringbuffer
   *(ringbuf + rbwindex) = b ;             // Put byte in ringbuffer
   if ( ++rbwindex == RINGBFSIZ )          // Increment pointer and
   {
-    rbwindex = 0 ;                        // wrap at end
+    rbwindex = 0 ;                        // wrap at the end
   }
   rcount++ ;                              // Count number of bytes in the
 }
@@ -2094,10 +2096,10 @@ vs1053player.loadDefaultVs1053Patches();               // Load default patch set
 #if defined ( LCD )
   dsp_begin();
   displayinfo ( "      Esp-radio     ", 0 ) ;
-  delay(10),
+  delay ( 10 ) ,
   displayinfo ( "      Starting      ", 2 ) ;
 #endif
-  delay(10);
+  delay ( 10 ) ;
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
   tckr.attach ( 0.100, timer100 ) ;                    // Every 100 msec
   dbgprint ( "Selected network: %-25s", ini_block.ssid.c_str() ) ;

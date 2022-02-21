@@ -2,11 +2,7 @@
 Internet radio based on ESP8266 and VS1053.  
 This fork is optimised for Platformio and replaced ILI9163C display with LCD2004
 
-### NOTES:
-- Connection between LCD2004 and ESP8266 goes through level shifter,
-  which is not demonstrated on wiring diagram
-
-### Features:
+### Features
 - Can connect to thousands of Internet radio stations that broadcast MP3 or OGG audio streams.
 - Can connect to a standalone mp3 file on a server.
 - Can connect to a local mp3 file on LittleFS.
