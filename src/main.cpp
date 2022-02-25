@@ -3,8 +3,9 @@
 //*              by Ed Smallenburg (ed@smallenburg.nl)                                           *
 //************************************************************************************************
 //
+//
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 16 Feb 2022 12:10:00 GMT"
+#define VERSION "Sat, 26 Feb 2022 12:10:00 GMT"
 //
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
@@ -41,14 +42,24 @@ extern "C"
 #define VS1053_DCS    16
 #define VS1053_DREQ   10
 //
-// Use 23LC1024 SPI RAM as ringbuffer. CS pin is connected to GPIO 15
+// Use SPIRAM as ringbuffer
 #define SPIRAM
 #if defined ( SPIRAM )
-  // Full size of 23LC1024 chip is 131072 bytes
-  #define RINGBFSIZ         40000
+  // CS pin is connected to GPIO 15
+  #define SRAM_CS           15
+  // 23LC1024 supports theorically up to 20MHz
+  #define SRAM_FREQ         20e6
+  // Total size SPI RAM in bytes
+  #define SRAM_SIZE         131072
+  // Chunk size
+  #define CHUNKSIZE         32
+  // Total size SPI RAM in chunks
+  #define SRAM_CH_SIZE      4096
+  // Delay (in bytes) before reading from SPIRAM
+  #define SPIRAMDELAY       100000
 #else
   // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-  #define RINGBFSIZ         18000
+  #define RINGBFSIZ         16000
 #endif
 //
 // Debug buffer size
@@ -88,9 +99,9 @@ extern "C"
   #include <IRremoteESP8266.h>
   #include <IRrecv.h>
   #include <IRutils.h>
-  // IR receiver pin, 0 for GPIO 0
-  uint16_t IRRECV_PIN = 0;
-  IRrecv irrecv ( IRRECV_PIN ) ;
+  // IR receiver pin set to GPIO 0
+  uint16_t IR_PIN = 0;
+  IRrecv irrecv ( IR_PIN ) ;
   decode_results decodedIRCommand ;
   // IRremote button definitions
   #define IR_POWER      0xFFA25D
@@ -212,9 +223,18 @@ bool             localfile = false ;                       // Play from local mp
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
 uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
-uint8_t*         ringbuf ;                                 // Ringbuffer for VS1053
-uint16_t         rbwindex = 0 ;                            // Fill pointer in ringbuffer
-uint16_t         rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
+#if defined ( SPIRAM )
+  uint16_t       chcount ;                                 // Number of chunks currently in buffer
+  uint32_t       readinx ;                                 // Read index
+  uint32_t       writeinx ;                                // write index
+  uint8_t        prcwinx ;                                 // Index in pwchunk (see putring)
+  uint8_t        prcrinx ;                                 // Index in prchunk (see getring)
+  int32_t        spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
+#else
+  uint8_t*       ringbuf ;                                 // Ringbuffer for VS1053
+  uint16_t       rbwindex = 0 ;                            // Fill pointer in ringbuffer
+  uint16_t       rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
+#endif
 bool             scrollflag = false ;                      // Request to scroll LCD
 struct tm        timeinfo ;                                // Will be filled by NTP server
 char             timetxt[9] ;                              // Converted timeinfo
@@ -272,36 +292,37 @@ VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 //***************************************************************************************************
 //
 // Note that the display function are limited due to the minimal available space.
-//
-#define ACKENA true                                          // Enable ACK for I2C communication
-//
-#define DELAY_ENABLE_PULSE_SETTLE           50               // Command requires > 37us to settle
-#define FLAG_BACKLIGHT_ON                   0b00001000       // Bit 3, backlight enabled (disabled if clear)
-#define FLAG_ENABLE                         0b00000100       // Bit 2, Enable
-#define FLAG_RS_DATA                        0b00000001       // Bit 0, RS=data (command if clear)
-#define FLAG_RS_COMMAND                     0b00000000       // Command
-//
+
+
+#define ACKENA true                                         // Enable ACK for I2C communication
+
+#define DELAY_ENABLE_PULSE_SETTLE           50              // Command requires > 37us to settle
+#define FLAG_BACKLIGHT_ON                   0b00001000      // Bit 3, backlight enabled (disabled if clear)
+#define FLAG_ENABLE                         0b00000100      // Bit 2, Enable
+#define FLAG_RS_DATA                        0b00000001      // Bit 0, RS=data (command if clear)
+#define FLAG_RS_COMMAND                     0b00000000      // Command
+
 #define COMMAND_CLEAR_DISPLAY               0x01
 #define COMMAND_RETURN_HOME                 0x02
 #define COMMAND_ENTRY_MODE_SET              0x04
 #define COMMAND_DISPLAY_CONTROL             0x08
 #define COMMAND_FUNCTION_SET                0x20
 #define COMMAND_SET_DDRAM_ADDR              0x80
-//
+
 #define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
 #define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
-//
+
 #define FLAG_FUNCTION_SET_MODE_4BIT         0x00
 #define FLAG_FUNCTION_SET_LINES_2           0x08
 #define FLAG_FUNCTION_SET_DOTS_5X8          0x00
-//
+
 #define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
 #define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
-//
-#define dsp_print(a)                                         // Print a string 
-#define dsp_setCursor(a,b)                                   // Position the cursor
-#define dsp_getwidth()                      20               // Get width of screen
-#define dsp_getheight()                     4                // Get height of screen
+
+#define dsp_print(a)                                        // Print a string 
+#define dsp_setCursor(a,b)                                  // Position the cursor
+#define dsp_getwidth()                      20              // Get width of screen
+#define dsp_getheight()                     4               // Get height of screen
 
 
 class LCD2004
@@ -333,7 +354,7 @@ bool dsp_begin()
   
   if ( ( SDA_PIN >= 0 ) && ( SCL_PIN >= 0 ) )
   {
-    lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;               // Create an instance for LCD
+    lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;                // Create an instance for LCD
   }
   else
   {
@@ -348,22 +369,22 @@ bool dsp_begin()
 //***********************************************************************************************
 // Write functins for command, data and general.                                                *
 //***********************************************************************************************
-void LCD2004::swrite ( uint8_t val, uint8_t rs )           // General write, 8 bits data
+void LCD2004::swrite ( uint8_t val, uint8_t rs )            // General write, 8 bits data
 {
-  strobe ( ( val & 0xf0 ) | rs ) ;                         // Send 4 LSB bits
-  strobe ( ( val << 4 ) | rs ) ;                           // Send 4 MSB bits
+  strobe ( ( val & 0xf0 ) | rs ) ;                          // Send 4 LSB bits
+  strobe ( ( val << 4 ) | rs ) ;                            // Send 4 MSB bits
 }
 
 
 void LCD2004::write_data ( uint8_t val )
 {
-  swrite ( val, FLAG_RS_DATA ) ;                           // Send data (RS = HIGH)
+  swrite ( val, FLAG_RS_DATA ) ;                            // Send data (RS = HIGH)
 }
 
 
 void LCD2004::write_cmd ( uint8_t val )
 {
-  swrite ( val, FLAG_RS_COMMAND ) ;                        // Send command (RS = LOW)
+  swrite ( val, FLAG_RS_COMMAND ) ;                         // Send command (RS = LOW)
 }
 
 
@@ -374,9 +395,9 @@ void LCD2004::write_cmd ( uint8_t val )
 //***********************************************************************************************
 void LCD2004::strobe ( uint8_t cmd )
 {
-  scommand ( cmd | FLAG_ENABLE ) ;                         // Send command with E high
-  scommand ( cmd ) ;                                       // Same command with E low
-  delayMicroseconds ( DELAY_ENABLE_PULSE_SETTLE ) ;        // Wait a short time
+  scommand ( cmd | FLAG_ENABLE ) ;                          // Send command with E high
+  scommand ( cmd ) ;                                        // Same command with E low
+  delayMicroseconds ( DELAY_ENABLE_PULSE_SETTLE ) ;         // Wait a short time
 }
 
 
@@ -436,14 +457,14 @@ void LCD2004::sclear()
 //***********************************************************************************************
 void LCD2004::scroll ( bool son )
 {
-  uint8_t ecmd = COMMAND_ENTRY_MODE_SET |               // Assume no scroll
+  uint8_t ecmd = COMMAND_ENTRY_MODE_SET |                   // Assume no scroll
                  FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT ;
 
-  if ( son )                                            // Scroll on?
+  if ( son )                                                // Scroll on?
   {
-    ecmd |= FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON ;        // Yes, change function
+    ecmd |= FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON ;            // Yes, change function
   }
-  write_cmd ( ecmd ) ;                                  // Perform command
+  write_cmd ( ecmd ) ;                                      // Perform command
 }
 
 
@@ -465,14 +486,14 @@ void LCD2004::shome()
 //***********************************************************************************************
 void LCD2004::reset()
 {
-  scommand ( 0 ) ;                                // Put expander to known state
+  scommand ( 0 ) ;                                          // Put expander to known state
   delayMicroseconds ( 1000 ) ;
-  for ( int i = 0 ; i < 3 ; i++ )                 // Repeat 3 times
+  for ( int i = 0 ; i < 3 ; i++ )                           // Repeat 3 times
   {
-    strobe ( 0x03 << 4 ) ;                        // Select 4-bit mode
+    strobe ( 0x03 << 4 ) ;                                  // Select 4-bit mode
     delayMicroseconds ( 4500 ) ;
   }
-  strobe ( 0x02 << 4 ) ;                          // 4-bit
+  strobe ( 0x02 << 4 ) ;                                    // 4-bit
   delayMicroseconds ( 4500 ) ;
   write_cmd ( COMMAND_FUNCTION_SET |
               FLAG_FUNCTION_SET_MODE_4BIT |
@@ -773,7 +794,7 @@ bool getLocalTime ( struct tm * info, uint32_t ms )
       {
         return true;
       }
-        delay ( 10 ) ;
+      delay ( 10 ) ;
     }
     return false;
 }
@@ -823,6 +844,152 @@ void gettime()
 }
 
 
+#if defined ( SPIRAM )
+//******************************************************************************************
+// SPI RAM routines.                                                                       *
+//******************************************************************************************
+// Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
+//******************************************************************************************
+
+uint32_t spiTransfer32 ( uint32_t data )
+{
+  union { uint32_t val; struct { uint16_t lsb; uint16_t msb; }; } in, out;
+  in.val = data;
+  out.msb = SPI.transfer16 ( in.msb ) ;
+  out.lsb = SPI.transfer16 ( in.lsb ) ;
+  return out.val;
+}
+
+
+void spiramWrite ( uint32_t addr, uint8_t *buff, uint32_t size )
+{
+  int i = 0;
+  while ( size-- )
+  {
+      SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+      digitalWrite ( SRAM_CS, LOW ) ;
+      spiTransfer32 ( (0x02<<24)|(addr++&0x00ffffff) ) ;   // Set write mode
+      SPI.transfer ( buff[i++] ) ;
+      digitalWrite ( SRAM_CS, HIGH ) ;
+      SPI.endTransaction();  
+  }
+}
+
+
+void spiramRead ( uint32_t addr, uint8_t *buff, uint32_t size )
+{
+  int i = 0;
+  while ( size-- )
+  {
+      SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+      digitalWrite ( SRAM_CS, LOW ) ;
+      spiTransfer32 ( (0x03<<24)|(addr++&0x00ffffff) ) ;   // Set read mode
+      buff[i++] = SPI.transfer ( 0x00 );
+      digitalWrite ( SRAM_CS, HIGH ) ;
+      SPI.endTransaction();  
+  }
+}
+
+
+//******************************************************************************************
+//                              S P A C E A V A I L A B L E                                *
+//******************************************************************************************
+// Returns true if bufferspace is available.                                               *
+//******************************************************************************************
+bool spaceAvailable()
+{
+  return ( chcount < SRAM_CH_SIZE ) ;
+}
+
+
+//******************************************************************************************
+//                              D A T A A V A I L A B L E                                  *
+//******************************************************************************************
+// Returns the number of full chunks available in the buffer.                              *
+//******************************************************************************************
+uint16_t dataAvailable()
+{
+  return chcount ;
+}
+
+
+//******************************************************************************************
+//                    G E T F R E E B U F F E R S P A C E                                  *
+//******************************************************************************************
+// Return the free buffer space in chunks.                                                 *
+//******************************************************************************************
+uint16_t getFreeBufferSpace()
+{
+  return ( SRAM_CH_SIZE - chcount ) ;                // Return number of chuinks available
+}
+
+
+//******************************************************************************************
+//                             B U F F E R W R I T E                                       *
+//******************************************************************************************
+// Write one chunk (32 bytes) to SPI RAM.                                                  *
+// No check on available space.  See spaceAvailable().                                     *
+//******************************************************************************************
+void bufferWrite ( uint8_t *b )
+{
+  spiramWrite ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ; // Put byte in SRAM
+  writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
+  chcount++ ;                                           // Count number of chunks
+}
+
+
+//******************************************************************************************
+//                             B U F F E R R E A D                                         *
+//******************************************************************************************
+// Read one chunk in the user buffer.                                                      *
+// Assume there is always something in the bufferpace.  See dataAvailable()                *
+//******************************************************************************************
+void bufferRead ( uint8_t *b )
+{
+  spiramRead ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // return next chunk
+  readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
+  chcount-- ;                                          // Count is now one less
+}
+
+
+//******************************************************************************************
+//                            B U F F E R R E S E T                                        *
+//******************************************************************************************
+void bufferReset()
+{
+  readinx = 0 ;                                     // Reset ringbuffer administration
+  writeinx = 0 ;
+  chcount = 0 ;
+}
+
+
+//******************************************************************************************
+//                                S P I R A M S E T U P                                    *
+//******************************************************************************************
+void spiramSetup()
+{
+  SPI.begin();
+  pinMode ( SRAM_CS, OUTPUT ) ;
+  digitalWrite ( SRAM_CS, HIGH ) ;
+
+  digitalWrite ( SRAM_CS, HIGH ) ;
+  delay ( 50 ) ;
+  digitalWrite ( SRAM_CS, LOW ) ;
+  delay ( 50 ) ;
+  digitalWrite ( SRAM_CS, HIGH ) ;
+
+  SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+  digitalWrite ( SRAM_CS, LOW ) ;
+  SPI.transfer ( 0x01 ) ;                             // Write mode register
+  SPI.transfer ( 0x00 ) ;                             // Set byte mode
+  digitalWrite ( SRAM_CS, HIGH ) ;
+  SPI.endTransaction();
+
+  bufferReset() ;                                     // Reset ringbuffer administration
+}
+#endif
+
+
 //******************************************************************************************
 // Ringbuffer (fifo) routines.                                                             *
 //******************************************************************************************
@@ -831,7 +998,11 @@ void gettime()
 //******************************************************************************************
 inline bool ringspace()
 {
-  return ( rcount < RINGBFSIZ ) ;    // True is at least one byte of free space is available
+  #if defined ( SPIRAM )
+    return spaceAvailable() ;         // True if at least 1 chunk available
+  #else
+    return ( rcount < RINGBFSIZ ) ;   // True is at least one byte of free space is available
+  #endif
 }
 
 
@@ -840,7 +1011,11 @@ inline bool ringspace()
 //******************************************************************************************
 inline uint16_t ringavail()
 {
-  return rcount ;                        // Return number of bytes available
+  #if defined ( SPIRAM )
+    return dataAvailable() ;          // Return number of chunks filled
+  #else
+    return rcount ;                   // Return number of bytes available
+  #endif
 }
 
 
@@ -849,14 +1024,24 @@ inline uint16_t ringavail()
 //******************************************************************************************
 // No check on available space.  See ringspace()                                           *
 //******************************************************************************************
-void putring ( uint8_t b )                // Put one byte in the ringbuffer
+void putring ( uint8_t b )              // Put one byte in the ringbuffer
 {
-  *(ringbuf + rbwindex) = b ;             // Put byte in ringbuffer
-  if ( ++rbwindex == RINGBFSIZ )          // Increment pointer and
-  {
-    rbwindex = 0 ;                        // wrap at the end
-  }
-  rcount++ ;                              // Count number of bytes in the
+  #if defined ( SPIRAM )
+    static uint8_t pwchunk[32] ;        // Buffer for one chunk
+    pwchunk[prcwinx++] = b ;            // Store in local chunk
+    if ( prcwinx == sizeof(pwchunk) )   // Chunk full?
+    {
+      bufferWrite ( pwchunk ) ;         // Yes, store in SPI RAM
+      prcwinx = 0 ;                     // Index to begin of chunk
+    }
+  #else
+    *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
+    if ( ++rbwindex == RINGBFSIZ )      // Increment pointer and
+    {
+      rbwindex = 0 ;                    // wrap at end
+    }
+    rcount++ ;                          // Count number of bytes in the
+  #endif
 }
 
 
@@ -867,12 +1052,22 @@ void putring ( uint8_t b )                // Put one byte in the ringbuffer
 //******************************************************************************************
 uint8_t getring()
 {
-  if ( ++rbrindex == RINGBFSIZ )          // Increment pointer and
-  {
-    rbrindex = 0 ;                        // wrap at end
-  }
-  rcount-- ;                              // Count is now one less
-  return *(ringbuf + rbrindex) ;          // return the oldest byte
+  #if defined ( SPIRAM )
+    static uint8_t prchunk[32] ;          // Buffer for one chunk
+    if ( prcrinx >= sizeof(prchunk) )     // End of buffer reached?
+    {
+      prcrinx = 0 ;                       // Yes, reset index to begin of buffer
+      bufferRead ( prchunk ) ;            // And read new buffer
+    }
+    return ( prchunk[prcrinx++] ) ;
+  #else
+    if ( ++rbrindex == RINGBFSIZ )        // Increment pointer and
+    {
+      rbrindex = 0 ;                      // wrap at end
+    }
+    rcount-- ;                            // Count is now one less
+    return *(ringbuf + rbrindex) ;        // return the oldest byte
+  #endif
 }
 
 
@@ -881,9 +1076,14 @@ uint8_t getring()
 //******************************************************************************************
 void emptyring()
 {
-  rbwindex = 0 ;                          // Reset ringbuffer administration
-  rbrindex = RINGBFSIZ - 1 ;
-  rcount = 0 ;
+  #if defined ( SPIRAM )
+    prcwinx = 0 ;
+    prcrinx = 32 ;                        // Set buffer to empty
+  #else
+    rbwindex = 0 ;                        // Reset ringbuffer administration
+    rbrindex = RINGBFSIZ - 1 ;
+    rcount = 0 ;
+  #endif
 }
 
 
@@ -1363,7 +1563,7 @@ void showstreamtitle ( const char *ml, bool full )
 //******************************************************************************************
 // Disconnect from the server.                                                             *
 //******************************************************************************************
-void stop_mp3client ()
+void stop_mp3client()
 {
   if ( mp3client )
   {
@@ -1920,7 +2120,7 @@ String xmlparse ( String mount )
   stationMount = "" ;
   xmlTag = "" ;
   xmlData = "" ;
-  stop_mp3client() ; // Stop any current wificlient connections.
+  stop_mp3client() ;                                // Stop any current wificlient connections
   dbgprint ( "Connect to new iHeartRadio host: %s", mount.c_str() ) ;
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
@@ -2033,11 +2233,8 @@ void setup()
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
   #if defined ( SPIRAM )
-    ESP.setExternalHeap();                             // Set external memory to use
-    ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
-    dbgprint ( "External buffer: Address %p, free %d\n", 
-                    ringbuf, ESP.getFreeHeap() ) ;
-    ESP.resetHeap();
+    spiramSetup() ;                                    // Yes, do set-up
+    emptyring() ;                                      // Empty the buffer
   #else
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
   #endif
@@ -2096,7 +2293,7 @@ vs1053player.loadDefaultVs1053Patches();               // Load default patch set
 #if defined ( LCD )
   dsp_begin();
   displayinfo ( "      Esp-radio     ", 0 ) ;
-  delay ( 10 ) ,
+  delay ( 10 ) ;
   displayinfo ( "      Starting      ", 2 ) ;
 #endif
   delay ( 10 ) ;
@@ -2153,19 +2350,19 @@ vs1053player.loadDefaultVs1053Patches();               // Load default patch set
   }
   #if defined ( SPIRAM )
     dbgprint ( "Testing SPIRAM getring/putring" ) ;
-    for ( int i = 0 ; i < 96 ; i++ )                    // Test for 96 bytes, 3 chunks
+    for ( int i = 0 ; i < 96 ; i++ )                   // Test for 96 bytes, 3 chunks
     {
-      putring ( i ) ;                                    // Store in spiram
-      dbgprint ( "Test 1: %d, chunks avl is %d",         // Test, expect 0,0 1,0 2,0 .... 95,3
+      putring ( i ) ;                                  // Store in spiram
+      dbgprint ( "Test 1: %d, chunks avl is %d",       // Test, expect 0,0 1,0 2,0 .... 95,3
                 i, ringavail() ) ;
     }
-    for ( int i = 0 ; i < 96 ; i++ )                    // Test for 100 bytes
+    for ( int i = 0 ; i < 96 ; i++ )                   // Test for 100 bytes
     {
-      uint8_t c = getring() ;                            // Read from spiram
-      dbgprint ( "Test 2: %d, data is %d, ch av is %d",  // Test, expect 0,0,2 1,1,2 2,2,2 .... 95,95,0
-                i, c, ringavail() ) ;
+      uint8_t c = getring() ;                          // Read from spiram
+      dbgprint ( "Test 2: %d, data is %d, ch av is %d",
+                i, c, ringavail() ) ;                  // Test, expect 0,0,2 1,1,2 2,2,2 .... 95,95,0
     }
-    dbgprint ( "Chunks avl is %d",                       // Test, expect 0
+    dbgprint ( "Chunks avl is %d",                     // Test, expect 0
               ringavail() ) ;
   #endif
 }
@@ -2185,24 +2382,24 @@ vs1053player.loadDefaultVs1053Patches();               // Load default patch set
 //******************************************************************************************
 void loop()
 {
-  uint32_t    maxfilechunk  ;                           // Max number of bytes to read from
-                                                        // stream or file
+  uint32_t    maxfilechunk  ;                          // Max number of bytes to read from
+                                                       // stream or file
   // Try to keep the ringbuffer filled up by adding as much bytes as possible
-  if ( datamode & ( INIT | HEADER | DATA |              // Test op playing
+  if ( datamode & ( INIT | HEADER | DATA |             // Test op playing
                     METADATA | PLAYLISTINIT |
                     PLAYLISTHEADER |
                     PLAYLISTDATA ) )
   {
     if ( localfile )
     {
-      maxfilechunk = mp3file.available() ;              // Bytes left in file
-      if ( maxfilechunk > 1024 )                        // Reduce byte count for this loop()
+      maxfilechunk = mp3file.available() ;             // Bytes left in file
+      if ( maxfilechunk > 1024 )                       // Reduce byte count for this loop()
       {
         maxfilechunk = 1024 ;
       }
       while ( ringspace() && maxfilechunk-- )
       {
-        putring ( mp3file.read() ) ;                    // Yes, store one byte in ringbuffer
+        putring ( mp3file.read() ) ;                   // Yes, store one byte in ringbuffer
         yield() ;
       }
     }
@@ -2223,6 +2420,13 @@ void loop()
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
+    #if defined ( SPIRAM )
+      if ( spiramdelay != 0 )                          // Delay before reading SPIRAM?
+      {
+        spiramdelay-- ;                                // Yes, count down
+        break ;                                        // and skip handling of data
+      }
+    #endif
     handlebyte_ch ( getring() ) ;                      // Yes, handle it
   }
   yield() ;
@@ -2624,6 +2828,9 @@ void handlebyte ( uint8_t b, bool force )
                       ", metaint is %d",               // and metaint
                     bitrate, metaint ) ;
           datamode = DATA ;                            // Expecting data now
+          #if defined ( SPIRAM )
+            spiramdelay = SPIRAMDELAY ;                // Start delay
+          #endif
           //emptyring() ;                              // Empty SPIRAM buffer (not sure about this)
           datacount = metaint ;                        // Number of bytes before first metadata
           bufcnt = 0 ;                                 // Reset buffer count
@@ -3148,6 +3355,9 @@ char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
+    #if defined ( SPIRAM )                            // SPI RAM use?         
+      rcount = dataAvailable() ;                      // Yes, get free space
+    #endif
     if ( mp3client )
     {
       sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
