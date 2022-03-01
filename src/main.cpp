@@ -3,8 +3,9 @@
 //*              by Ed Smallenburg (ed@smallenburg.nl)                                           *
 //************************************************************************************************
 //
+//
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sun, 11 Feb 2022 12:10:00 GMT"
+#define VERSION "Sat, 26 Feb 2022 12:10:00 GMT"
 //
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
@@ -37,30 +38,28 @@ extern "C"
 //
 // Digital I/O used
 // Pins for VS1053 module
-#define VS1053_CS     15
+#define VS1053_CS     2
 #define VS1053_DCS    16
-#define VS1053_DREQ   2
+#define VS1053_DREQ   10
 //
 // Use SPIRAM as ringbuffer
-//#define SPIRAM
+#define SPIRAM
 #if defined ( SPIRAM )
-  // SPI RAM settings
-  #include <ESP8266Spiram.h>
-  // GPIO 1O CS pin
-  #define SRAM_CS           10
+  // CS pin is connected to GPIO 15
+  #define SRAM_CS           15
   // 23LC1024 supports theorically up to 20MHz
-  #define SRAM_FREQ         16e6
-  // Total size SPI ram in bytes
+  #define SRAM_FREQ         20e6
+  // Total size SPI RAM in bytes
   #define SRAM_SIZE         131072
   // Chunk size
   #define CHUNKSIZE         32
-  // Total size SPI ram in chunks
+  // Total size SPI RAM in chunks
   #define SRAM_CH_SIZE      4096
   // Delay (in bytes) before reading from SPIRAM
-  #define SPIRAMDELAY       200000
+  #define SPIRAMDELAY       100000
 #else
   // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-  #define RINGBFSIZ         20000
+  #define RINGBFSIZ         16000
 #endif
 //
 // Debug buffer size
@@ -86,41 +85,11 @@ extern "C"
 #define LCD
 #if defined ( LCD )
   #include <Wire.h>
-  // Pins for LCD 2004
+  // SDA and SCL pins for LCD 2004
   #define SDA_PIN     4
   #define SCL_PIN     5
   // Adjust for your display
   #define I2C_ADDRESS 0x27
-  // Enable ACK for I2C communication
-  #define ACKENA      true
-  //
-  #define DELAY_ENABLE_PULSE_SETTLE           50               // Command requires > 37us to settle
-  #define FLAG_BACKLIGHT_ON                   0b00001000       // Bit 3, backlight enabled (disabled if clear)
-  #define FLAG_ENABLE                         0b00000100       // Bit 2, Enable
-  #define FLAG_RS_DATA                        0b00000001       // Bit 0, RS=data (command if clear)
-  #define FLAG_RS_COMMAND                     0b00000000       // Command
-  //
-  #define COMMAND_CLEAR_DISPLAY               0x01
-  #define COMMAND_RETURN_HOME                 0x02
-  #define COMMAND_ENTRY_MODE_SET              0x04
-  #define COMMAND_DISPLAY_CONTROL             0x08
-  #define COMMAND_FUNCTION_SET                0x20
-  #define COMMAND_SET_DDRAM_ADDR              0x80
-  //
-  #define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
-  #define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
-  //
-  #define FLAG_FUNCTION_SET_MODE_4BIT         0x00
-  #define FLAG_FUNCTION_SET_LINES_2           0x08
-  #define FLAG_FUNCTION_SET_DOTS_5X8          0x00
-  //
-  #define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
-  #define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
-  //
-  #define dsp_print(a)                                         // Print a string 
-  #define dsp_setCursor(a,b)                                   // Position the cursor
-  #define dsp_getwidth()                      20               // Get width of screen
-  #define dsp_getheight()                     4                // Get height of screen
 #endif
 //
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
@@ -130,9 +99,9 @@ extern "C"
   #include <IRremoteESP8266.h>
   #include <IRrecv.h>
   #include <IRutils.h>
-  // IR receiver pin, 0 for GPIO 0
-  uint16_t IRRECV_PIN = 0;
-  IRrecv irrecv ( IRRECV_PIN ) ;
+  // IR receiver pin set to GPIO 0
+  uint16_t IR_PIN = 0;
+  IRrecv irrecv ( IR_PIN ) ;
   decode_results decodedIRCommand ;
   // IRremote button definitions
   #define IR_POWER      0xFFA25D
@@ -324,6 +293,38 @@ VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 //
 // Note that the display function are limited due to the minimal available space.
 
+
+#define ACKENA true                                         // Enable ACK for I2C communication
+
+#define DELAY_ENABLE_PULSE_SETTLE           50              // Command requires > 37us to settle
+#define FLAG_BACKLIGHT_ON                   0b00001000      // Bit 3, backlight enabled (disabled if clear)
+#define FLAG_ENABLE                         0b00000100      // Bit 2, Enable
+#define FLAG_RS_DATA                        0b00000001      // Bit 0, RS=data (command if clear)
+#define FLAG_RS_COMMAND                     0b00000000      // Command
+
+#define COMMAND_CLEAR_DISPLAY               0x01
+#define COMMAND_RETURN_HOME                 0x02
+#define COMMAND_ENTRY_MODE_SET              0x04
+#define COMMAND_DISPLAY_CONTROL             0x08
+#define COMMAND_FUNCTION_SET                0x20
+#define COMMAND_SET_DDRAM_ADDR              0x80
+
+#define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
+#define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
+
+#define FLAG_FUNCTION_SET_MODE_4BIT         0x00
+#define FLAG_FUNCTION_SET_LINES_2           0x08
+#define FLAG_FUNCTION_SET_DOTS_5X8          0x00
+
+#define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
+#define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
+
+#define dsp_print(a)                                        // Print a string 
+#define dsp_setCursor(a,b)                                  // Position the cursor
+#define dsp_getwidth()                      20              // Get width of screen
+#define dsp_getheight()                     4               // Get height of screen
+
+
 class LCD2004
 {
   public:
@@ -353,7 +354,7 @@ bool dsp_begin()
   
   if ( ( SDA_PIN >= 0 ) && ( SCL_PIN >= 0 ) )
   {
-    lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;               // Create an instance for LCD
+    lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;                // Create an instance for LCD
   }
   else
   {
@@ -368,22 +369,22 @@ bool dsp_begin()
 //***********************************************************************************************
 // Write functins for command, data and general.                                                *
 //***********************************************************************************************
-void LCD2004::swrite ( uint8_t val, uint8_t rs )          // General write, 8 bits data
+void LCD2004::swrite ( uint8_t val, uint8_t rs )            // General write, 8 bits data
 {
-  strobe ( ( val & 0xf0 ) | rs ) ;                        // Send 4 LSB bits
-  strobe ( ( val << 4 ) | rs ) ;                          // Send 4 MSB bits
+  strobe ( ( val & 0xf0 ) | rs ) ;                          // Send 4 LSB bits
+  strobe ( ( val << 4 ) | rs ) ;                            // Send 4 MSB bits
 }
 
 
 void LCD2004::write_data ( uint8_t val )
 {
-  swrite ( val, FLAG_RS_DATA ) ;                           // Send data (RS = HIGH)
+  swrite ( val, FLAG_RS_DATA ) ;                            // Send data (RS = HIGH)
 }
 
 
 void LCD2004::write_cmd ( uint8_t val )
 {
-  swrite ( val, FLAG_RS_COMMAND ) ;                        // Send command (RS = LOW)
+  swrite ( val, FLAG_RS_COMMAND ) ;                         // Send command (RS = LOW)
 }
 
 
@@ -394,9 +395,9 @@ void LCD2004::write_cmd ( uint8_t val )
 //***********************************************************************************************
 void LCD2004::strobe ( uint8_t cmd )
 {
-  scommand ( cmd | FLAG_ENABLE ) ;                  // Send command with E high
-  scommand ( cmd ) ;                                // Same command with E low
-  delayMicroseconds ( DELAY_ENABLE_PULSE_SETTLE ) ; // Wait a short time
+  scommand ( cmd | FLAG_ENABLE ) ;                          // Send command with E high
+  scommand ( cmd ) ;                                        // Same command with E low
+  delayMicroseconds ( DELAY_ENABLE_PULSE_SETTLE ) ;         // Wait a short time
 }
 
 
@@ -456,14 +457,14 @@ void LCD2004::sclear()
 //***********************************************************************************************
 void LCD2004::scroll ( bool son )
 {
-  uint8_t ecmd = COMMAND_ENTRY_MODE_SET |               // Assume no scroll
+  uint8_t ecmd = COMMAND_ENTRY_MODE_SET |                   // Assume no scroll
                  FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT ;
 
-  if ( son )                                            // Scroll on?
+  if ( son )                                                // Scroll on?
   {
-    ecmd |= FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON ;        // Yes, change function
+    ecmd |= FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON ;            // Yes, change function
   }
-  write_cmd ( ecmd ) ;                                  // Perform command
+  write_cmd ( ecmd ) ;                                      // Perform command
 }
 
 
@@ -485,14 +486,14 @@ void LCD2004::shome()
 //***********************************************************************************************
 void LCD2004::reset()
 {
-  scommand ( 0 ) ;                                // Put expander to known state
+  scommand ( 0 ) ;                                          // Put expander to known state
   delayMicroseconds ( 1000 ) ;
-  for ( int i = 0 ; i < 3 ; i++ )                 // Repeat 3 times
+  for ( int i = 0 ; i < 3 ; i++ )                           // Repeat 3 times
   {
-    strobe ( 0x03 << 4 ) ;                        // Select 4-bit mode
+    strobe ( 0x03 << 4 ) ;                                  // Select 4-bit mode
     delayMicroseconds ( 4500 ) ;
   }
-  strobe ( 0x02 << 4 ) ;                          // 4-bit
+  strobe ( 0x02 << 4 ) ;                                    // 4-bit
   delayMicroseconds ( 4500 ) ;
   write_cmd ( COMMAND_FUNCTION_SET |
               FLAG_FUNCTION_SET_MODE_4BIT |
@@ -515,13 +516,14 @@ void LCD2004::reset()
 LCD2004::LCD2004 ( uint8_t sda, uint8_t scl )
 {
   Wire.begin ( sda, scl ) ;
-  delay(10);
-  Wire.setClock ( 100000UL ) ;                        //experimental! ESP8266 i2c bus speed: 100kHz..400kHz/100000UL..400000UL, default 100000UL
-  Wire.setClockStretchLimit ( 230 ) ;                 //experimental! default 230
+  delay ( 10 ) ;
+  Wire.setClock ( 100000UL ) ;                        // Experimental! ESP8266 i2c bus speed: 
+                                                      // 100kHz..400kHz/100000UL..400000UL, default 100000UL
+  Wire.setClockStretchLimit ( 230 ) ;                 // Experimental! default 230
   Wire.beginTransmission ( I2C_ADDRESS ) ;
   if ( Wire.endTransmission() != 0 )
   {
-    dbgprint ( "LCD2004 connection error!" ) ;        //safety check, make sure the PCF8574 is connected
+    dbgprint ( "LCD2004 connection error!" ) ;        // Safety check, make sure the PCF8574 is connected
   }
   reset() ;
 }
@@ -769,8 +771,8 @@ void displayinfo ( const char *str, int pos )
   dsp_update_line ( pos ) ;                     // Show on display
 }
 #else
-#define displayinfo(a,b)                        // Empty declaration
-#define displaytime(a)
+  #define displayinfo(a,b)                      // Empty declaration
+  #define displaytime(a)
 #endif
 
 
@@ -780,28 +782,28 @@ void displayinfo ( const char *str, int pos )
 // Retrieve the local time from NTP server and convert to string.                                  *
 // Will be called every second.                                                                    *
 //**************************************************************************************************
-bool getLocalTime(struct tm * info, uint32_t ms)
+bool getLocalTime ( struct tm * info, uint32_t ms )
 {
     uint32_t start = millis();
     time_t now;
-    while((millis()-start) <= ms) {
-        time(&now);
-        localtime_r(&now, info);
-        if(info->tm_year > (2016 - 1900))
-        {
-            return true;
-        }
-        delay(10);
+    while ( ( millis()-start ) <= ms )
+    {
+      time ( &now ) ;
+      localtime_r ( &now, info ) ;
+      if ( info->tm_year > ( 2016 - 1900 ) )
+      {
+        return true;
+      }
+      delay ( 10 ) ;
     }
     return false;
 }
 
 void gettime()
 {
+  #if defined ( LCD )
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
-
-  #if defined ( LCD )
   {
     if ( timeinfo.tm_year )                                 // Legal time found?
     {
@@ -849,7 +851,45 @@ void gettime()
 // Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
 //******************************************************************************************
 
-ESP8266Spiram spiram ( SRAM_CS, SRAM_FREQ ) ;
+uint32_t spiTransfer32 ( uint32_t data )
+{
+  union { uint32_t val; struct { uint16_t lsb; uint16_t msb; }; } in, out;
+  in.val = data;
+  out.msb = SPI.transfer16 ( in.msb ) ;
+  out.lsb = SPI.transfer16 ( in.lsb ) ;
+  return out.val;
+}
+
+
+void spiramWrite ( uint32_t addr, uint8_t *buff, uint32_t size )
+{
+  int i = 0;
+  while ( size-- )
+  {
+      SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+      digitalWrite ( SRAM_CS, LOW ) ;
+      spiTransfer32 ( (0x02<<24)|(addr++&0x00ffffff) ) ;   // Set write mode
+      SPI.transfer ( buff[i++] ) ;
+      digitalWrite ( SRAM_CS, HIGH ) ;
+      SPI.endTransaction();  
+  }
+}
+
+
+void spiramRead ( uint32_t addr, uint8_t *buff, uint32_t size )
+{
+  int i = 0;
+  while ( size-- )
+  {
+      SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+      digitalWrite ( SRAM_CS, LOW ) ;
+      spiTransfer32 ( (0x03<<24)|(addr++&0x00ffffff) ) ;   // Set read mode
+      buff[i++] = SPI.transfer ( 0x00 );
+      digitalWrite ( SRAM_CS, HIGH ) ;
+      SPI.endTransaction();  
+  }
+}
+
 
 //******************************************************************************************
 //                              S P A C E A V A I L A B L E                                *
@@ -892,7 +932,7 @@ uint16_t getFreeBufferSpace()
 //******************************************************************************************
 void bufferWrite ( uint8_t *b )
 {
-  spiram.write ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ; // Put byte in SRAM
+  spiramWrite ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ; // Put byte in SRAM
   writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
   chcount++ ;                                           // Count number of chunks
 }
@@ -906,7 +946,7 @@ void bufferWrite ( uint8_t *b )
 //******************************************************************************************
 void bufferRead ( uint8_t *b )
 {
-  spiram.read ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // return next chunk
+  spiramRead ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // return next chunk
   readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
   chcount-- ;                                          // Count is now one less
 }
@@ -928,8 +968,24 @@ void bufferReset()
 //******************************************************************************************
 void spiramSetup()
 {
-  spiram.begin() ;                                  // Init ESP8266Spiram
-  bufferReset() ;                                   // Reset ringbuffer administration
+  SPI.begin();
+  pinMode ( SRAM_CS, OUTPUT ) ;
+  digitalWrite ( SRAM_CS, HIGH ) ;
+
+  digitalWrite ( SRAM_CS, HIGH ) ;
+  delay ( 50 ) ;
+  digitalWrite ( SRAM_CS, LOW ) ;
+  delay ( 50 ) ;
+  digitalWrite ( SRAM_CS, HIGH ) ;
+
+  SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+  digitalWrite ( SRAM_CS, LOW ) ;
+  SPI.transfer ( 0x01 ) ;                             // Write mode register
+  SPI.transfer ( 0x00 ) ;                             // Set byte mode
+  digitalWrite ( SRAM_CS, HIGH ) ;
+  SPI.endTransaction();
+
+  bufferReset() ;                                     // Reset ringbuffer administration
 }
 #endif
 
@@ -1020,7 +1076,7 @@ uint8_t getring()
 //******************************************************************************************
 void emptyring()
 {
-  #ifdef SPIRAM
+  #if defined ( SPIRAM )
     prcwinx = 0 ;
     prcrinx = 32 ;                        // Set buffer to empty
   #else
@@ -1143,7 +1199,7 @@ void listNetworks()
 //******************************************************************************************
 void timer10sec()
 {
-  static uint32_t oldtotalcount = 7321 ;          // Needed foor change detection
+  static uint32_t oldtotalcount = 7321 ;          // Needed for change detection
   static uint8_t  morethanonce = 0 ;              // Counter for succesive fails
   static uint8_t  t600 = 0 ;                      // Counter for 10 minutes
 
@@ -1507,7 +1563,7 @@ void showstreamtitle ( const char *ml, bool full )
 //******************************************************************************************
 // Disconnect from the server.                                                             *
 //******************************************************************************************
-void stop_mp3client ()
+void stop_mp3client()
 {
   if ( mp3client )
   {
@@ -2064,7 +2120,7 @@ String xmlparse ( String mount )
   stationMount = "" ;
   xmlTag = "" ;
   xmlData = "" ;
-  stop_mp3client() ; // Stop any current wificlient connections.
+  stop_mp3client() ;                                // Stop any current wificlient connections
   dbgprint ( "Connect to new iHeartRadio host: %s", mount.c_str() ) ;
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
@@ -2237,10 +2293,10 @@ vs1053player.loadDefaultVs1053Patches();               // Load default patch set
 #if defined ( LCD )
   dsp_begin();
   displayinfo ( "      Esp-radio     ", 0 ) ;
-  delay(10),
+  delay ( 10 ) ;
   displayinfo ( "      Starting      ", 2 ) ;
 #endif
-  delay(10);
+  delay ( 10 ) ;
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
   tckr.attach ( 0.100, timer100 ) ;                    // Every 100 msec
   dbgprint ( "Selected network: %-25s", ini_block.ssid.c_str() ) ;
@@ -2294,19 +2350,19 @@ vs1053player.loadDefaultVs1053Patches();               // Load default patch set
   }
   #if defined ( SPIRAM )
     dbgprint ( "Testing SPIRAM getring/putring" ) ;
-    for ( int i = 0 ; i < 96 ; i++ )                    // Test for 96 bytes, 3 chunks
+    for ( int i = 0 ; i < 96 ; i++ )                   // Test for 96 bytes, 3 chunks
     {
-      putring ( i ) ;                                    // Store in spiram
-      dbgprint ( "Test 1: %d, chunks avl is %d",         // Test, expect 0,0 1,0 2,0 .... 95,3
+      putring ( i ) ;                                  // Store in spiram
+      dbgprint ( "Test 1: %d, chunks avl is %d",       // Test, expect 0,0 1,0 2,0 .... 95,3
                 i, ringavail() ) ;
     }
-    for ( int i = 0 ; i < 96 ; i++ )                    // Test for 100 bytes
+    for ( int i = 0 ; i < 96 ; i++ )                   // Test for 100 bytes
     {
-      uint8_t c = getring() ;                            // Read from spiram
-      dbgprint ( "Test 2: %d, data is %d, ch av is %d",  // Test, expect 0,0,2 1,1,2 2,2,2 .... 95,95,0
-                i, c, ringavail() ) ;
+      uint8_t c = getring() ;                          // Read from spiram
+      dbgprint ( "Test 2: %d, data is %d, ch av is %d",
+                i, c, ringavail() ) ;                  // Test, expect 0,0,2 1,1,2 2,2,2 .... 95,95,0
     }
-    dbgprint ( "Chunks avl is %d",                       // Test, expect 0
+    dbgprint ( "Chunks avl is %d",                     // Test, expect 0
               ringavail() ) ;
   #endif
 }
@@ -2326,24 +2382,24 @@ vs1053player.loadDefaultVs1053Patches();               // Load default patch set
 //******************************************************************************************
 void loop()
 {
-  uint32_t    maxfilechunk  ;                           // Max number of bytes to read from
-                                                        // stream or file
+  uint32_t    maxfilechunk  ;                          // Max number of bytes to read from
+                                                       // stream or file
   // Try to keep the ringbuffer filled up by adding as much bytes as possible
-  if ( datamode & ( INIT | HEADER | DATA |              // Test op playing
+  if ( datamode & ( INIT | HEADER | DATA |             // Test op playing
                     METADATA | PLAYLISTINIT |
                     PLAYLISTHEADER |
                     PLAYLISTDATA ) )
   {
     if ( localfile )
     {
-      maxfilechunk = mp3file.available() ;              // Bytes left in file
-      if ( maxfilechunk > 1024 )                        // Reduce byte count for this loop()
+      maxfilechunk = mp3file.available() ;             // Bytes left in file
+      if ( maxfilechunk > 1024 )                       // Reduce byte count for this loop()
       {
         maxfilechunk = 1024 ;
       }
       while ( ringspace() && maxfilechunk-- )
       {
-        putring ( mp3file.read() ) ;                    // Yes, store one byte in ringbuffer
+        putring ( mp3file.read() ) ;                   // Yes, store one byte in ringbuffer
         yield() ;
       }
     }

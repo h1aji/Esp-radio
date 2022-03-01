@@ -50,3 +50,4 @@
 - 19-08-2021, LCD 2004 support added.
 - 10-09-2021, NTP support added.
 - 10-02-2022: Add redirection.
+- 16-02-2022: SPI RAM modifications.
