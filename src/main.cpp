@@ -350,7 +350,7 @@ LCD2004* lcd = NULL ;
 
 bool dsp_begin()
 {
-  dbgprint ( "Init LCD2004: I2C SDA, SCL pins %d, %d", SDA_PIN, SCL_PIN ) ;
+  dbgprint ( "Init I2C LCD2004: SDA on GPIO %d, SCL on GPIO %d", SDA_PIN, SCL_PIN ) ;
   
   if ( ( SDA_PIN >= 0 ) && ( SCL_PIN >= 0 ) )
   {
@@ -784,19 +784,19 @@ void displayinfo ( const char *str, int pos )
 //**************************************************************************************************
 bool getLocalTime ( struct tm * info, uint32_t ms )
 {
-    uint32_t start = millis();
-    time_t now;
-    while ( ( millis()-start ) <= ms )
+  uint32_t start = millis();
+  time_t now;
+  while ( ( millis()-start ) <= ms )
+  {
+    time ( &now ) ;
+    localtime_r ( &now, info ) ;
+    if ( info->tm_year > ( 2016 - 1900 ) )
     {
-      time ( &now ) ;
-      localtime_r ( &now, info ) ;
-      if ( info->tm_year > ( 2016 - 1900 ) )
-      {
-        return true;
-      }
-      delay ( 10 ) ;
+      return true;
     }
-    return false;
+    delay ( 10 ) ;
+  }
+  return false;
 }
 
 void gettime()
@@ -819,7 +819,10 @@ void gettime()
       {
         dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
       }
-      dbgprint ( "Sync TOD" ) ;
+      else
+      {
+        dbgprint ( "Sync TOD" ) ;
+      }
       if ( !getLocalTime ( &timeinfo, 5000 ) )              // Read from NTP server
       {
         dbgprint ( "Failed to obtain time!" ) ;             // Error
@@ -920,7 +923,7 @@ uint16_t dataAvailable()
 //******************************************************************************************
 uint16_t getFreeBufferSpace()
 {
-  return ( SRAM_CH_SIZE - chcount ) ;                // Return number of chuinks available
+  return ( SRAM_CH_SIZE - chcount ) ;                   // Return number of chunks available
 }
 
 
@@ -932,7 +935,7 @@ uint16_t getFreeBufferSpace()
 //******************************************************************************************
 void bufferWrite ( uint8_t *b )
 {
-  spiramWrite ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ; // Put byte in SRAM
+  spiramWrite ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // Put byte in SRAM
   writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
   chcount++ ;                                           // Count number of chunks
 }
@@ -946,7 +949,7 @@ void bufferWrite ( uint8_t *b )
 //******************************************************************************************
 void bufferRead ( uint8_t *b )
 {
-  spiramRead ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // return next chunk
+  spiramRead ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;   // return next chunk
   readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
   chcount-- ;                                          // Count is now one less
 }
@@ -1001,7 +1004,7 @@ inline bool ringspace()
   #if defined ( SPIRAM )
     return spaceAvailable() ;         // True if at least 1 chunk available
   #else
-    return ( rcount < RINGBFSIZ ) ;   // True is at least one byte of free space is available
+    return ( rcount < RINGBFSIZ ) ;   // True if at least one byte of free space is available
   #endif
 }
 
@@ -1038,7 +1041,7 @@ void putring ( uint8_t b )              // Put one byte in the ringbuffer
     *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
     if ( ++rbwindex == RINGBFSIZ )      // Increment pointer and
     {
-      rbwindex = 0 ;                    // wrap at end
+      rbwindex = 0 ;                    // wrap at the end
     }
     rcount++ ;                          // Count number of bytes in the
   #endif
@@ -1063,10 +1066,10 @@ uint8_t getring()
   #else
     if ( ++rbrindex == RINGBFSIZ )        // Increment pointer and
     {
-      rbrindex = 0 ;                      // wrap at end
+      rbrindex = 0 ;                      // wrap at the end
     }
     rcount-- ;                            // Count is now one less
-    return *(ringbuf + rbrindex) ;        // return the oldest byte
+    return *(ringbuf + rbrindex) ;        // Return the oldest byte
   #endif
 }
 
@@ -2776,12 +2779,13 @@ void handlebyte ( uint8_t b, bool force )
           if ( lcml.indexOf ( "http://" ) > 8 )        // Redirection with http://?
           {
             host = metaline.substring ( 17 ) ;         // Yes, get new URL
+            hostreq = true ;
           }
           else if ( lcml.indexOf ( "https://" ) )      // Redirection with ttps://?
           {
             host = metaline.substring ( 18 ) ;         // Yes, get new URL
+            hostreq = true ;
           }
-          hostreq = true ;
         }
         if ( lcml.indexOf ( "content-type" ) >= 0 )    // Line with "Content-Type: xxxx/yyy"
         {
