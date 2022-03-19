@@ -47,3 +47,12 @@ This fork is optimised for Platformio and replaced ILI9163C display with LCD2004
 
 ### Schematic
 ![diagram](./doc/schema.png)
+
+
+### Photos
+<details>
+
+![Photo1](./doc/photo3.jpg)
+![Photo2](./doc/photo2.jpg)
+![Photo3](./doc/photo1.jpg)
+</details>

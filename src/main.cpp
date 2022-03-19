@@ -5,20 +5,21 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sat, 26 Feb 2022 12:10:00 GMT"
+#define VERSION "Wed, 16 Mar 2022 12:10:00 GMT"
 //
+#include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
-#include <ESPAsyncTCP.h>
-#include <ESPAsyncWebServer.h>
-#include <AsyncMqttClient.h>
+#include <LittleFS.h>
 #include <SPI.h>
-#include <Ticker.h>
 #include <stdio.h>
 #include <string.h>
-#include <ArduinoOTA.h>
-#include <TinyXML.h>
-#include <LittleFS.h>
+#include <Ticker.h>
 #include <time.h>
+
+#include <AsyncMqttClient.h>
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <TinyXML.h>
 #include <VS1053.h>
 
 extern "C"
@@ -73,14 +74,6 @@ extern "C"
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS     20
 //
-// NTP settings
-// Default NZ time zone
-#define TZ         12
-// DST is +1 hour
-#define DST        1
-// Default server for NTP
-#define NTP_SERVER "pool.ntp.org"
-//
 // Define LCD if you are using LCD 2004
 #define LCD
 #if defined ( LCD )
@@ -93,7 +86,7 @@ extern "C"
 #endif
 //
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
-// Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
+// Enable support for IRremote by uncommenting the next line and setting IR_PIN and the IR_ commands
 #define IR
 #if defined ( IR )
   #include <IRremoteESP8266.h>
@@ -104,27 +97,23 @@ extern "C"
   IRrecv irrecv ( IR_PIN ) ;
   decode_results decodedIRCommand ;
   // IRremote button definitions
-  #define IR_POWER      0xFFA25D
-  #define IR_MODE       0xFF629D   // Mode
-  #define IR_VOLDOWN    0xFFA857
-  #define IR_VOLUP      0xFF906F
-  #define IR_PREV       0xFF02FD
-  #define IR_NEXT       0xFFC23D
-  #define IR_MUTE       0xFFE21D
-  #define IR_STOP       0xFFE01F   // EQ
-  #define IR_PLAY       0xFF22DD   // Play/Pause
-  #define IR_RPT        0xFF9867   // RPT
-  #define IR_USD        0xFFB04F   // U/SD
-  #define IR_PRESET00   0xFF6897
-  #define IR_PRESET01   0xFF30CF
-  #define IR_PRESET02   0xFF18E7
-  #define IR_PRESET03   0xFF7A85
-  #define IR_PRESET04   0xFF10EF
-  #define IR_PRESET05   0xFF38C7
-  #define IR_PRESET06   0xFF5AA5
-  #define IR_PRESET07   0xFF42BD
-  #define IR_PRESET08   0xFF4AB5
-  #define IR_PRESET09   0xFF52AD
+  #define IR_VOLDOWN    0xFF4AB5
+  #define IR_VOLUP      0xFF18E7
+  #define IR_PREV       0xFF10EF
+  #define IR_NEXT       0xFF5AA5
+  #define IR_MUTE       0xFF38C7
+  #define IR_STOP       0xFF6897 // *
+  #define IR_PLAY       0xFFB04F // #
+  #define IR_PRESET00   0xFF9867
+  #define IR_PRESET01   0xFFA25D
+  #define IR_PRESET02   0xFF629D
+  #define IR_PRESET03   0xFFE21D
+  #define IR_PRESET04   0xFF22DD
+  #define IR_PRESET05   0xFF02FD
+  #define IR_PRESET06   0xFFC23D
+  #define IR_PRESET07   0xFFE01F
+  #define IR_PRESET08   0xFFA857
+  #define IR_PRESET09   0xFF906F
 #endif
 
 
@@ -146,10 +135,12 @@ char*  analyzeCmd ( const char* par, const char* val ) ;
 String chomp ( String str ) ;
 void   publishIP() ;
 String xmlparse ( String mount ) ;
-bool   connecttohost() ;
-void   gettime() ;
 void   XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
                     char* data,  uint16_t dataLen ) ;
+bool   connecttohost() ;
+void   gettime() ;
+String utf8ascii ( const char* s ) ;
+void   scan_content_length ( const char* metalinebf ) ;
 
 //
 //******************************************************************************************
@@ -171,6 +162,9 @@ struct ini_struct
   uint8_t        reqvol ;                                  // Requested volume
   uint8_t        rtone[4] ;                                // Requested bass/treble settings
   int8_t         newpreset ;                               // Requested preset
+  String         clk_server ;                              // Server to be used for time of day clock
+  int8_t         clk_offset ;                              // Offset in hours with respect to UTC
+  int8_t         clk_dst ;                                 // Number of hours shift during DST
   String         ssid ;                                    // SSID of WiFi network to connect to
   String         passwd ;                                  // Password for WiFi network
 } ;
@@ -199,6 +193,7 @@ String           metaline ;                                // Readable line in m
 String           icystreamtitle ;                          // Streamtitle from metadata
 String           icyname ;                                 // Icecast station name
 int              bitrate ;                                 // Bitrate in kb/sec
+int              mbitrate ;                                // Measured bitrate
 int              metaint = 0 ;                             // Number of databytes between metadata
 int8_t           currentpreset = -1 ;                      // Preset station playing
 String           host ;                                    // The URL to connect to or file to play
@@ -239,6 +234,7 @@ bool             scrollflag = false ;                      // Request to scroll 
 struct tm        timeinfo ;                                // Will be filled by NTP server
 char             timetxt[9] ;                              // Converted timeinfo
 bool             time_req = false ;                        // Set time requested
+uint32_t         clength ;                                 // Content length found in http header
 
 // XML parse globals.
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -351,14 +347,13 @@ LCD2004* lcd = NULL ;
 bool dsp_begin()
 {
   dbgprint ( "Init I2C LCD2004: SDA on GPIO %d, SCL on GPIO %d", SDA_PIN, SCL_PIN ) ;
-  
-  if ( ( SDA_PIN >= 0 ) && ( SCL_PIN >= 0 ) )
+  if ( ( SDA_PIN == 4 ) && ( SCL_PIN == 5 ) )
   {
     lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;                // Create an instance for LCD
   }
   else
   {
-    dbgprint ( "Init LCD2004 failed!" ) ;
+    dbgprint ( "Init I2C LCD2004 failed!" ) ;
   }
   return ( lcd != NULL ) ;
 }
@@ -516,10 +511,7 @@ void LCD2004::reset()
 LCD2004::LCD2004 ( uint8_t sda, uint8_t scl )
 {
   Wire.begin ( sda, scl ) ;
-  delay ( 10 ) ;
-  Wire.setClock ( 100000UL ) ;                        // Experimental! ESP8266 i2c bus speed: 
-                                                      // 100kHz..400kHz/100000UL..400000UL, default 100000UL
-  Wire.setClockStretchLimit ( 230 ) ;                 // Experimental! default 230
+  delay ( 50 ) ;
   Wire.beginTransmission ( I2C_ADDRESS ) ;
   if ( Wire.endTransmission() != 0 )
   {
@@ -853,7 +845,6 @@ void gettime()
 //******************************************************************************************
 // Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
 //******************************************************************************************
-
 uint32_t spiTransfer32 ( uint32_t data )
 {
   union { uint32_t val; struct { uint16_t lsb; uint16_t msb; }; } in, out;
@@ -863,33 +854,31 @@ uint32_t spiTransfer32 ( uint32_t data )
   return out.val;
 }
 
-
 void spiramWrite ( uint32_t addr, uint8_t *buff, uint32_t size )
 {
   int i = 0;
   while ( size-- )
   {
-      SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
-      digitalWrite ( SRAM_CS, LOW ) ;
-      spiTransfer32 ( (0x02<<24)|(addr++&0x00ffffff) ) ;   // Set write mode
-      SPI.transfer ( buff[i++] ) ;
-      digitalWrite ( SRAM_CS, HIGH ) ;
-      SPI.endTransaction();  
+    SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+    digitalWrite ( SRAM_CS, LOW ) ;
+    spiTransfer32 ( (0x02<<24)|(addr++&0x00ffffff) ) ;   // Set write mode
+    SPI.transfer ( buff[i++] ) ;
+    digitalWrite ( SRAM_CS, HIGH ) ;
+    SPI.endTransaction();
   }
 }
-
 
 void spiramRead ( uint32_t addr, uint8_t *buff, uint32_t size )
 {
   int i = 0;
   while ( size-- )
   {
-      SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
-      digitalWrite ( SRAM_CS, LOW ) ;
-      spiTransfer32 ( (0x03<<24)|(addr++&0x00ffffff) ) ;   // Set read mode
-      buff[i++] = SPI.transfer ( 0x00 );
-      digitalWrite ( SRAM_CS, HIGH ) ;
-      SPI.endTransaction();  
+    SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+    digitalWrite ( SRAM_CS, LOW ) ;
+    spiTransfer32 ( (0x03<<24)|(addr++&0x00ffffff) ) ;   // Set read mode
+    buff[i++] = SPI.transfer ( 0x00 );
+    digitalWrite ( SRAM_CS, HIGH ) ;
+    SPI.endTransaction();
   }
 }
 
@@ -960,7 +949,7 @@ void bufferRead ( uint8_t *b )
 //******************************************************************************************
 void bufferReset()
 {
-  readinx = 0 ;                                     // Reset ringbuffer administration
+  readinx = 0 ;                                        // Reset ringbuffer administration
   writeinx = 0 ;
   chcount = 0 ;
 }
@@ -1002,7 +991,7 @@ void spiramSetup()
 inline bool ringspace()
 {
   #if defined ( SPIRAM )
-    return spaceAvailable() ;         // True if at least 1 chunk available
+    return spaceAvailable() ;         // True if at least one chunk is available
   #else
     return ( rcount < RINGBFSIZ ) ;   // True if at least one byte of free space is available
   #endif
@@ -1200,18 +1189,21 @@ void listNetworks()
 // If totalcount has not been changed, there is a problem and playing will stop.           *
 // Note that a "yield()" within this routine or in called functions will cause a crash!    *
 //******************************************************************************************
-void timer10sec()
+void IRAM_ATTR timer10sec()
 {
   static uint32_t oldtotalcount = 7321 ;          // Needed for change detection
   static uint8_t  morethanonce = 0 ;              // Counter for succesive fails
   static uint8_t  t600 = 0 ;                      // Counter for 10 minutes
+  uint32_t        bytesplayed ;                   // Bytes send to MP3 converter
 
   if ( datamode & ( INIT | HEADER | DATA |        // Test op playing
                     METADATA | PLAYLISTINIT |
                     PLAYLISTHEADER |
                     PLAYLISTDATA ) )
   {
-    if ( totalcount == oldtotalcount )            // Still playing?
+    bytesplayed = totalcount - oldtotalcount ;    // Nunber of bytes played in the 10 seconds
+    oldtotalcount = totalcount ;                  // Save for comparison in next cycle
+    if ( bytesplayed == 0 )                       // Still playing?
     {
       dbgprint ( "No data input" ) ;              // No data detected!
       if ( morethanonce > 10 )                    // Happened too many times?
@@ -1236,6 +1228,10 @@ void timer10sec()
     }
     else
     {
+      // Data has been send to MP3 decoder
+      // Bitrate in kbits/s is bytesplayed / 10 / 1000 * 8
+      mbitrate = ( bytesplayed + 625 ) / 1250 ;   // Measured bitrate
+      morethanonce = 0 ;                          // Data seen, reset failcounter
       if ( morethanonce )                         // Recovered from data loss?
       {
         dbgprint ( "Recovered from dataloss" ) ;
@@ -1246,7 +1242,7 @@ void timer10sec()
     if ( t600++ == 60 )                           // 10 minutes over?
     {
       t600 = 0 ;                                  // Yes, reset counter
-      dbgprint ( "10 minutes over" ) ;
+      //dbgprint ( "10 minutes over" ) ;
       publishIP() ;                               // Re-publish IP
     }
   }
@@ -1342,13 +1338,12 @@ void testfile ( String fspec )
 //******************************************************************************************
 // Examine button every 100 msec.                                                          *
 //******************************************************************************************
-void timer100()
+void IRAM_ATTR timer100()
 {
   static int     count10sec = 0 ;                 // Counter for activate 10 seconds process
   uint16_t       v ;                              // Analog input value 0..1023
   static uint8_t aoldval = 0 ;                    // Previous value of analog input switch
   uint8_t        anewval ;                        // New value of analog input switch (0..3)
-  uint8_t        oldvol ;
 
   if ( ++count10sec == 100  )                     // 10 seconds passed?
   {
@@ -1397,110 +1392,6 @@ void timer100()
       }
     }
   }
-// Check for and execute new IR remote control commands
-#if defined ( IR )
-  if (irrecv.decode(&decodedIRCommand))
-  {
-    dbgprint ("IR Command received");
-    oldvol = vs1053player.getVolume();
-    if (decodedIRCommand.value == IR_VOLDOWN)
-    {
-      oldvol = vs1053player.getVolume();
-      ini_block.reqvol = oldvol - 2;
-      dbgprint ("Volume now is %d", ini_block.reqvol);
-    }
-    if (decodedIRCommand.value == IR_VOLUP)
-    {
-      oldvol = vs1053player.getVolume();
-      ini_block.reqvol = oldvol + 2;
-      dbgprint ("Volume now is %d", ini_block.reqvol);
-    }
-    if (ini_block.reqvol < 0) ini_block.reqvol = 0;
-    if (ini_block.reqvol > 100) ini_block.reqvol = 100;
-
-    if (decodedIRCommand.value == IR_PREV)
-    {
-      ini_block.newpreset = currentpreset - 1;
-      dbgprint ("IR Command: previous station");
-    }
-    if (decodedIRCommand.value == IR_NEXT)
-    {
-      ini_block.newpreset = currentpreset + 1;
-      dbgprint ("IR Command: next radio station");
-    }
-    if (decodedIRCommand.value == IR_MUTE)
-    {
-      muteflag = !muteflag;
-      dbgprint ("IR Command: mute");
-    }
-    if (decodedIRCommand.value == IR_POWER)
-    {
-      analyzeCmd("reset");
-      dbgprint ("IR Command: reset");
-    }
-    if (decodedIRCommand.value == IR_PLAY)
-    {
-      analyzeCmd("resume");
-      dbgprint ("IR Command: resume");
-    }
-    if (decodedIRCommand.value == IR_STOP)
-    {
-      analyzeCmd("stop");
-      dbgprint ("IR Command: stop");
-    }
-    if (decodedIRCommand.value == IR_PRESET00)
-    {
-      ini_block.newpreset = 0;
-      dbgprint ("IR Command: preset_00");
-    }
-    if (decodedIRCommand.value == IR_PRESET01)
-    {
-      ini_block.newpreset = 1;
-      dbgprint ("IR Command: preset_01");
-    }
-    if (decodedIRCommand.value == IR_PRESET02)
-    {
-      ini_block.newpreset = 2;
-      dbgprint ("IR Command: preset_02");
-    }
-    if (decodedIRCommand.value == IR_PRESET03)
-    {
-      ini_block.newpreset = 3;
-      dbgprint ("IR Command: preset_03");
-    }
-    if (decodedIRCommand.value == IR_PRESET04)
-    {
-      ini_block.newpreset = 4;
-      dbgprint ("IR Command: preset_04");
-    }
-    if (decodedIRCommand.value == IR_PRESET05)
-    {
-      ini_block.newpreset = 5;
-      dbgprint ("IR Command: preset_05");
-    }
-    if (decodedIRCommand.value == IR_PRESET06)
-    {
-      ini_block.newpreset = 6;
-      dbgprint ("IR Command: preset_06");
-    }
-    if (decodedIRCommand.value == IR_PRESET07)
-    {
-      ini_block.newpreset = 7;
-      dbgprint ("IR Command: preset_07");
-    }
-    if (decodedIRCommand.value == IR_PRESET08)
-    {
-      ini_block.newpreset = 8;
-      dbgprint ("IR Command: preset_08");
-    }
-    if (decodedIRCommand.value == IR_PRESET09)
-    {
-      ini_block.newpreset = 9;
-      dbgprint ("IR Command: preset_09");
-    }
-    irrecv.resume();  // Get ready to receive next IR command
-  }
-#endif
 }
 
 
@@ -1545,7 +1436,7 @@ void showstreamtitle ( const char *ml, bool full )
     icystreamtitle = "" ;                       // Unknown type
     return ;                                    // Do not show
   }
-  // Save for status request from browser ;
+  // Save for status request from browser and for MQTT
   icystreamtitle = streamtitle ;
   if ( ( p1 = strstr ( streamtitle, " - " ) ) ) // look for artist/title separator
   {
@@ -2219,6 +2110,115 @@ String xmlparse ( String mount )
   return String ( tmpstr ) ;                           // Return final streaming URL.
 }
 
+#if defined ( IR )
+//**************************************************************************************************
+//                                     S C A N I R                                                 *
+//**************************************************************************************************
+// See if IR input is available.  Execute the programmed command.                                  *
+//**************************************************************************************************
+void scanIR()
+{
+  uint8_t        oldvol ;
+
+  if ( irrecv.decode ( &decodedIRCommand ) )
+  {
+    dbgprint ( "IR Command received" ) ;
+    oldvol = vs1053player.getVolume();
+    if ( decodedIRCommand.value == IR_VOLDOWN )
+    {
+      oldvol = vs1053player.getVolume();
+      ini_block.reqvol = oldvol - 2;
+      dbgprint ( "Volume now is %d", ini_block.reqvol ) ;
+    }
+    if ( decodedIRCommand.value == IR_VOLUP )
+    {
+      oldvol = vs1053player.getVolume();
+      ini_block.reqvol = oldvol + 2;
+      dbgprint ( "Volume now is %d", ini_block.reqvol ) ;
+    }
+    if ( ini_block.reqvol < 0 ) ini_block.reqvol = 0;
+    if ( ini_block.reqvol > 100 ) ini_block.reqvol = 100;
+
+    if ( decodedIRCommand.value == IR_PREV )
+    {
+      ini_block.newpreset = currentpreset - 1;
+      dbgprint ( "IR Command: previous station" ) ;
+    }
+    if ( decodedIRCommand.value == IR_NEXT )
+    {
+      ini_block.newpreset = currentpreset + 1;
+      dbgprint ( "IR Command: next radio station" ) ;
+    }
+    if ( decodedIRCommand.value == IR_MUTE )
+    {
+      muteflag = !muteflag;
+      dbgprint ( "IR Command: mute" ) ;
+    }
+    if ( decodedIRCommand.value == IR_PLAY )
+    {
+      analyzeCmd("resume") ;
+      dbgprint ( "IR Command: resume" ) ;
+    }
+    if ( decodedIRCommand.value == IR_STOP )
+    {
+      analyzeCmd("stop");
+      dbgprint ("IR Command: stop");
+    }
+    if (decodedIRCommand.value == IR_PRESET00)
+    {
+      ini_block.newpreset = 0;
+      dbgprint ("IR Command: preset_00");
+    }
+    if (decodedIRCommand.value == IR_PRESET01)
+    {
+      ini_block.newpreset = 1;
+      dbgprint ("IR Command: preset_01");
+    }
+    if (decodedIRCommand.value == IR_PRESET02)
+    {
+      ini_block.newpreset = 2;
+      dbgprint ("IR Command: preset_02");
+    }
+    if (decodedIRCommand.value == IR_PRESET03)
+    {
+      ini_block.newpreset = 3;
+      dbgprint ("IR Command: preset_03");
+    }
+    if (decodedIRCommand.value == IR_PRESET04)
+    {
+      ini_block.newpreset = 4;
+      dbgprint ("IR Command: preset_04");
+    }
+    if (decodedIRCommand.value == IR_PRESET05)
+    {
+      ini_block.newpreset = 5;
+      dbgprint ("IR Command: preset_05");
+    }
+    if (decodedIRCommand.value == IR_PRESET06)
+    {
+      ini_block.newpreset = 6;
+      dbgprint ("IR Command: preset_06");
+    }
+    if (decodedIRCommand.value == IR_PRESET07)
+    {
+      ini_block.newpreset = 7;
+      dbgprint ("IR Command: preset_07");
+    }
+    if (decodedIRCommand.value == IR_PRESET08)
+    {
+      ini_block.newpreset = 8;
+      dbgprint ("IR Command: preset_08");
+    }
+    if (decodedIRCommand.value == IR_PRESET09)
+    {
+      ini_block.newpreset = 9;
+      dbgprint ("IR Command: preset_09");
+    }
+    irrecv.resume();  // Get ready to receive next IR command
+  }
+}
+#endif
+
 
 //******************************************************************************************
 //                                   S E T U P                                             *
@@ -2250,6 +2250,9 @@ void setup()
   ini_block.mqttpasswd = "" ;
   ini_block.mqtttopic  = "" ;
   ini_block.mqttpubtopic = "" ;
+  ini_block.clk_server = "pool.ntp.org" ;              // Default server for NTP
+  ini_block.clk_offset = 0 ;                           // Default UTC time zone
+  ini_block.clk_dst = 1 ;                              // DST is +1 hour
   ini_block.reqvol       = 0 ;
   memset ( ini_block.rtone, 0, 4 )  ;
   ini_block.newpreset    = 0 ;
@@ -2291,8 +2294,8 @@ void setup()
 #if defined ( IR )
   irrecv.enableIRIn();                                 // Enable IR receiver
 #endif
-vs1053player.begin() ;                                 // Initialize VS1053 player
-vs1053player.loadDefaultVs1053Patches();               // Load default patch set for VS1053
+  vs1053player.begin() ;                               // Initialize VS1053 player
+  vs1053player.loadDefaultVs1053Patches();             // Load default patch set for VS1053
 #if defined ( LCD )
   dsp_begin();
   displayinfo ( "      Esp-radio     ", 0 ) ;
@@ -2344,7 +2347,9 @@ vs1053player.loadDefaultVs1053Patches();               // Load default patch set
     currentpreset = ini_block.newpreset ;              // No network: do not start radio
   }
   delay ( 1000 ) ;                                     // Show IP for a while
-  configTime ( TZ * 3600, DST * 3600, NTP_SERVER ) ;   // GMT offset, daylight offset in seconds
+  configTime ( ini_block.clk_offset * 3600,
+               ini_block.clk_dst * 3600,
+               ini_block.clk_server.c_str() ) ;        // GMT offset, daylight offset in seconds
   timeinfo.tm_year = 0 ;                               // Set TOD to illegal
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
   if ( NetworkFound )
@@ -2569,6 +2574,9 @@ void loop()
   #endif
   scanserial() ;                                       // Handle serial input
   ArduinoOTA.handle() ;                                // Check for OTA
+  #if defined ( IR )
+    scanIR() ;                                         // See if IR input
+  #endif
 }
 
 
@@ -2635,6 +2643,21 @@ bool chkhdrline ( const char* str )
     }
   }
   return false ;                                      // End of string without colon
+}
+
+
+//**************************************************************************************************
+//                            S C A N _ C O N T E N T _ L E N G T H                                *
+//**************************************************************************************************
+// If the line contains content-length information: set clength (content length counter).          *
+//**************************************************************************************************
+void scan_content_length ( const char* metalinebf )
+{
+  if ( strstr ( metalinebf, "Content-Length" ) )      // Line contains content length
+  {
+    clength = atoi ( metalinebf + 15 ) ;              // Yes, set clength
+    dbgprint ( "Content-Length is %d", clength ) ;    // Show for debugging purposes
+  }
 }
 
 
@@ -2790,7 +2813,8 @@ void handlebyte ( uint8_t b, bool force )
         if ( lcml.indexOf ( "content-type" ) >= 0 )    // Line with "Content-Type: xxxx/yyy"
         {
           ctseen = true ;                              // Yes, remember seeing this
-          ct = metaline.substring ( 14 ) ;             // Set contentstype. Not used yet
+          String ct = metaline.substring ( 14 ) ;      // Set contentstype. Not used yet
+          ct.trim() ;
           dbgprint ( "%s seen.", ct.c_str() ) ;
         }
         if ( lcml.startsWith ( "icy-br:" ) )
@@ -2830,7 +2854,7 @@ void handlebyte ( uint8_t b, bool force )
         {
           dbgprint ( "Switch to DATA, bitrate is %d"   // Show bitrate
                       ", metaint is %d",               // and metaint
-                    bitrate, metaint ) ;
+                      mbitrate, metaint ) ;
           datamode = DATA ;                            // Expecting data now
           #if defined ( SPIRAM )
             spiramdelay = SPIRAMDELAY ;                // Start delay
@@ -2909,13 +2933,14 @@ void handlebyte ( uint8_t b, bool force )
          ( b == '\r' ) ||                              // Ignore CR
          ( b == '\0' ) )                               // Ignore NULL
     {
-      // Yes, ignore
+      return ;                                         // Quick return
     }
     else if ( b == '\n' )                              // Linefeed ?
     {
       LFcount++ ;                                      // Count linefeeds
       dbgprint ( "Playlistheader: %s",                 // Show playlistheader
                  metaline.c_str() ) ;
+      scan_content_length ( metaline.c_str() ) ;       // Check if it is a content-length line
       metaline = "" ;                                  // Ready for next line
       if ( LFcount == 2 )
       {
@@ -3399,6 +3424,21 @@ char* analyzeCmd ( const char* par, const char* val )
   else if ( argument == "rate" )                      // Rate command?
   {
     vs1053player.adjustRate ( ivalue ) ;              // Yes, adjust
+  }
+  else if ( argument.startsWith ( "clk" ) )           // Parameter fo NTP?
+  {
+    if ( argument.indexOf ( "server" ) > 0 )          // Server specified?
+    {
+      ini_block.clk_server = value.c_str() ;          // Yes, set NTP server accordingly
+    }
+    else if ( argument.indexOf ( "offset" ) > 0 )     // Offset specified?
+    {
+      ini_block.clk_offset = ivalue ;                 // Yes, set offset 
+    }
+    else if ( argument.indexOf ( "dst" ) > 0 )        // DST specified?
+    {
+      ini_block.clk_dst = ivalue ;                    // Yes, set DST accordingly
+    }
   }
   else if ( argument.startsWith ( "mqtt" ) )          // Parameter fo MQTT?
   {
