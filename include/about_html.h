@@ -20,11 +20,12 @@ const char about_html[] PROGMEM = R"=====(
    <h1>** ESP Radio **</h1>
   </center>
 	<p>Esp-radio - Webradio receiver for ESP8266, LCD2004 monochrome display and VS1053 MP3 module.<br>
-	This project is documented at <a target="blank" href="https://github.com/Edzelf/Esp-radio">Github</a>.</p>
+	This project is available on <a target="blank" href="https://github.com/h1aji/Esp-radio">Github</a>.</p>
 	<p>Author: Ed Smallenburg<br>
+  Modified by: Murad Ustarkhanov<br>
 	Webinterface design: <a target="blank" href="http://www.sanderjochems.nl/">Sander Jochems</a><br>
 	App (Android): <a target="blank" href="https://play.google.com/store/apps/details?id=com.thunkable.android.sander542jochems.ESP_Radio">Sander Jochems</a><br>
-	Date: January 2017</p>
+	First Released in January 2017</p>
   <script type="text/javascript">
     var stylesheet = document.createElement('link') ;
     stylesheet.href = 'radio.css' ;
