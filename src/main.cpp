@@ -5,21 +5,23 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sat, 26 Feb 2022 12:10:00 GMT"
+#define VERSION "Wed, 13 Apr 2022 12:10:00 GMT"
 //
+#include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
-#include <ESPAsyncTCP.h>
-#include <ESPAsyncWebServer.h>
-#include <AsyncMqttClient.h>
+#include <LittleFS.h>
 #include <SPI.h>
-#include <Ticker.h>
 #include <stdio.h>
 #include <string.h>
-#include <ArduinoOTA.h>
-#include <TinyXML.h>
-#include <LittleFS.h>
+#include <Ticker.h>
 #include <time.h>
-#include <VS1053.h>
+
+#include <AsyncMqttClient.h>
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <TinyXML.h>
+
+#include "vs1053b-patches.h"
 
 extern "C"
 {
@@ -73,14 +75,6 @@ extern "C"
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS     20
 //
-// NTP settings
-// Default NZ time zone
-#define TZ         12
-// DST is +1 hour
-#define DST        1
-// Default server for NTP
-#define NTP_SERVER "pool.ntp.org"
-//
 // Define LCD if you are using LCD 2004
 #define LCD
 #if defined ( LCD )
@@ -93,7 +87,7 @@ extern "C"
 #endif
 //
 // Support for IR remote control for station and volume control through IRremoteESP8266 library
-// Enable support for IRremote by uncommenting the next line and setting IRRECV_PIN and the IRCODEx commands
+// Enable support for IRremote by uncommenting the next line and setting IR_PIN and the IR_ commands
 #define IR
 #if defined ( IR )
   #include <IRremoteESP8266.h>
@@ -104,27 +98,23 @@ extern "C"
   IRrecv irrecv ( IR_PIN ) ;
   decode_results decodedIRCommand ;
   // IRremote button definitions
-  #define IR_POWER      0xFFA25D
-  #define IR_MODE       0xFF629D   // Mode
-  #define IR_VOLDOWN    0xFFA857
-  #define IR_VOLUP      0xFF906F
-  #define IR_PREV       0xFF02FD
-  #define IR_NEXT       0xFFC23D
-  #define IR_MUTE       0xFFE21D
-  #define IR_STOP       0xFFE01F   // EQ
-  #define IR_PLAY       0xFF22DD   // Play/Pause
-  #define IR_RPT        0xFF9867   // RPT
-  #define IR_USD        0xFFB04F   // U/SD
-  #define IR_PRESET00   0xFF6897
-  #define IR_PRESET01   0xFF30CF
-  #define IR_PRESET02   0xFF18E7
-  #define IR_PRESET03   0xFF7A85
-  #define IR_PRESET04   0xFF10EF
-  #define IR_PRESET05   0xFF38C7
-  #define IR_PRESET06   0xFF5AA5
-  #define IR_PRESET07   0xFF42BD
-  #define IR_PRESET08   0xFF4AB5
-  #define IR_PRESET09   0xFF52AD
+  #define IR_VOLDOWN    0xFF4AB5
+  #define IR_VOLUP      0xFF18E7
+  #define IR_PREV       0xFF10EF
+  #define IR_NEXT       0xFF5AA5
+  #define IR_MUTE       0xFF38C7
+  #define IR_STOP       0xFF6897 // *
+  #define IR_PLAY       0xFFB04F // #
+  #define IR_PRESET00   0xFF9867
+  #define IR_PRESET01   0xFFA25D
+  #define IR_PRESET02   0xFF629D
+  #define IR_PRESET03   0xFFE21D
+  #define IR_PRESET04   0xFF22DD
+  #define IR_PRESET05   0xFF02FD
+  #define IR_PRESET06   0xFFC23D
+  #define IR_PRESET07   0xFFE01F
+  #define IR_PRESET08   0xFFA857
+  #define IR_PRESET09   0xFF906F
 #endif
 
 
@@ -146,10 +136,12 @@ char*  analyzeCmd ( const char* par, const char* val ) ;
 String chomp ( String str ) ;
 void   publishIP() ;
 String xmlparse ( String mount ) ;
-bool   connecttohost() ;
-void   gettime() ;
 void   XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
                     char* data,  uint16_t dataLen ) ;
+bool   connecttohost() ;
+void   gettime() ;
+String utf8ascii ( const char* s ) ;
+void   scan_content_length ( const char* metalinebf ) ;
 
 //
 //******************************************************************************************
@@ -171,6 +163,9 @@ struct ini_struct
   uint8_t        reqvol ;                                  // Requested volume
   uint8_t        rtone[4] ;                                // Requested bass/treble settings
   int8_t         newpreset ;                               // Requested preset
+  String         clk_server ;                              // Server to be used for time of day clock
+  int8_t         clk_offset ;                              // Offset in hours with respect to UTC
+  int8_t         clk_dst ;                                 // Number of hours shift during DST
   String         ssid ;                                    // SSID of WiFi network to connect to
   String         passwd ;                                  // Password for WiFi network
 } ;
@@ -199,6 +194,7 @@ String           metaline ;                                // Readable line in m
 String           icystreamtitle ;                          // Streamtitle from metadata
 String           icyname ;                                 // Icecast station name
 int              bitrate ;                                 // Bitrate in kb/sec
+int              mbitrate ;                                // Measured bitrate
 int              metaint = 0 ;                             // Number of databytes between metadata
 int8_t           currentpreset = -1 ;                      // Preset station playing
 String           host ;                                    // The URL to connect to or file to play
@@ -239,6 +235,7 @@ bool             scrollflag = false ;                      // Request to scroll 
 struct tm        timeinfo ;                                // Will be filled by NTP server
 char             timetxt[9] ;                              // Converted timeinfo
 bool             time_req = false ;                        // Set time requested
+uint32_t         clength ;                                 // Content length found in http header
 
 // XML parse globals.
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -268,6 +265,448 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 #include "radio_css.h"
 #include "favicon_ico.h"
 
+
+//
+//******************************************************************************************
+// VS1053 stuff.  Based on maniacbug library.                                              *
+//******************************************************************************************
+// VS1053 class definition.                                                                *
+//******************************************************************************************
+class VS1053
+{
+  private:
+    uint8_t       cs_pin ;                        // Pin where CS line is connected
+    uint8_t       dcs_pin ;                       // Pin where DCS line is connected
+    uint8_t       dreq_pin ;                      // Pin where DREQ line is connected
+    uint8_t       curvol ;                        // Current volume setting 0..100%
+    const uint8_t vs1053_chunk_size = 32 ;
+    // SCI Register
+    const uint8_t SCI_MODE          = 0x0 ;
+    const uint8_t SCI_STATUS        = 0x1 ;
+    const uint8_t SCI_BASS          = 0x2 ;
+    const uint8_t SCI_CLOCKF        = 0x3 ;
+    const uint8_t SCI_AUDATA        = 0x5 ;
+    const uint8_t SCI_WRAM          = 0x6 ;
+    const uint8_t SCI_WRAMADDR      = 0x7 ;
+    const uint8_t SCI_AIADDR        = 0xA ;
+    const uint8_t SCI_VOL           = 0xB ;
+    const uint8_t SCI_AICTRL0       = 0xC ;
+    const uint8_t SCI_AICTRL1       = 0xD ;
+    const uint8_t SCI_num_registers = 0xF ;
+    // SCI_MODE bits
+    const uint8_t SM_SDINEW         = 11 ;        // Bitnumber in SCI_MODE always on
+    const uint8_t SM_RESET          = 2 ;         // Bitnumber in SCI_MODE soft reset
+    const uint8_t SM_CANCEL         = 3 ;         // Bitnumber in SCI_MODE cancel song
+    const uint8_t SM_TESTS          = 5 ;         // Bitnumber in SCI_MODE for tests
+    const uint8_t SM_LINE1          = 14 ;        // Bitnumber in SCI_MODE for Line input
+    SPISettings   VS1053_SPI ;                    // SPI settings for this slave
+    uint8_t       endFillByte ;                   // Byte to send when stopping song
+  protected:
+    inline void await_data_request() const
+    {
+      while ( !digitalRead ( dreq_pin ) )
+      {
+        yield() ;                                 // Very short delay
+      }
+    }
+
+    inline void control_mode_on() const
+    {
+      SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
+      digitalWrite ( dcs_pin, HIGH ) ;            // Bring slave in control mode
+      digitalWrite ( cs_pin, LOW ) ;
+    }
+
+    inline void control_mode_off() const
+    {
+      digitalWrite ( cs_pin, HIGH ) ;             // End control mode
+      SPI.endTransaction() ;                      // Allow other SPI users
+    }
+
+    inline void data_mode_on() const
+    {
+      SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
+      digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
+      digitalWrite ( dcs_pin, LOW ) ;
+    }
+
+    inline void data_mode_off() const
+    {
+      digitalWrite ( dcs_pin, HIGH ) ;            // End data mode
+      SPI.endTransaction() ;                      // Allow other SPI users
+    }
+
+    uint16_t read_register ( uint8_t _reg ) const ;
+    void     write_register ( uint8_t _reg, uint16_t _value ) const ;
+    void     sdi_send_buffer ( uint8_t* data, size_t len ) ;
+    void     sdi_send_fillers ( size_t length ) ;
+    void     wram_write ( uint16_t address, uint16_t data ) ;
+    uint16_t wram_read ( uint16_t address ) ;
+
+  public:
+    // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
+    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) ;
+    void     begin() ;                                   // Begin operation.  Sets pins correctly,
+    // and prepares SPI bus.
+    void     startSong() ;                               // Prepare to start playing. Call this each
+    // time a new song starts.
+    void     playChunk ( uint8_t* data, size_t len ) ;   // Play a chunk of data.  Copies the data to
+    // the chip.  Blocks until complete.
+    void     stopSong() ;                                // Finish playing a song. Call this after
+    // the last playChunk call.
+    void     setVolume ( uint8_t vol ) ;                 // Set the player volume.Level from 0-100,
+    // higher is louder.
+    void     setTone ( uint8_t* rtone ) ;                // Set the player baas/treble, 4 nibbles for
+    // treble gain/freq and bass gain/freq
+    uint8_t  getVolume() ;                               // Get the currenet volume setting.
+    // higher is louder.
+    void     printDetails ( const char *header ) ;       // Print configuration details to serial output.
+    void     softReset() ;                               // Do a soft reset
+    bool     testComm ( const char *header ) ;           // Test communication with module
+    inline bool data_request() const
+    {
+      return ( digitalRead ( dreq_pin ) == HIGH ) ;
+    }
+    void     adjustRate ( long ppm2 ) ;                  // Fine tune the datarate
+    void     switchToMp3Mode();
+    uint16_t getChipVersion();                           // Gets version of the VLSI chip being used
+
+    void loadUserCode ( const unsigned short* plugin, unsigned short plugin_size ) ;
+    void loadDefaultVs1053Patches();                     // Loads the latest generic firmware patch.
+
+} ;
+
+//******************************************************************************************
+// VS1053 class implementation.                                                            *
+//******************************************************************************************
+
+VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) :
+  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin)
+{
+}
+
+uint16_t VS1053::read_register ( uint8_t _reg ) const
+{
+  uint16_t result ;
+
+  control_mode_on() ;
+  SPI.write ( 3 ) ;                                // Read operation
+  SPI.write ( _reg ) ;                             // Register to write (0..0xF)
+  // Note: transfer16 does not seem to work
+  result = ( SPI.transfer ( 0xFF ) << 8 ) |        // Read 16 bits data
+           ( SPI.transfer ( 0xFF ) ) ;
+  await_data_request() ;                           // Wait for DREQ to be HIGH again
+  control_mode_off() ;
+  return result ;
+}
+
+void VS1053::write_register ( uint8_t _reg, uint16_t _value ) const
+{
+  control_mode_on( );
+  SPI.write ( 2 ) ;                                // Write operation
+  SPI.write ( _reg ) ;                             // Register to write (0..0xF)
+  SPI.write16 ( _value ) ;                         // Send 16 bits data
+  await_data_request() ;
+  control_mode_off() ;
+}
+
+void VS1053::sdi_send_buffer ( uint8_t* data, size_t len )
+{
+  size_t chunk_length ;                            // Length of chunk 32 byte or shorter
+
+  data_mode_on() ;
+  while ( len )                                    // More to do?
+  {
+    await_data_request() ;                         // Wait for space available
+    chunk_length = len ;
+    if ( len > vs1053_chunk_size )
+    {
+      chunk_length = vs1053_chunk_size ;
+    }
+    len -= chunk_length ;
+    SPI.writeBytes ( data, chunk_length ) ;
+    data += chunk_length ;
+  }
+  data_mode_off() ;
+}
+
+void VS1053::sdi_send_fillers ( size_t len )
+{
+  size_t chunk_length ;                            // Length of chunk 32 byte or shorter
+
+  data_mode_on() ;
+  while ( len )                                    // More to do?
+  {
+    await_data_request() ;                         // Wait for space available
+    chunk_length = len ;
+    if ( len > vs1053_chunk_size )
+    {
+      chunk_length = vs1053_chunk_size ;
+    }
+    len -= chunk_length ;
+    while ( chunk_length-- )
+    {
+      SPI.write ( endFillByte ) ;
+    }
+  }
+  data_mode_off();
+}
+
+void VS1053::wram_write ( uint16_t address, uint16_t data )
+{
+  write_register ( SCI_WRAMADDR, address ) ;
+  write_register ( SCI_WRAM, data ) ;
+}
+
+uint16_t VS1053::wram_read ( uint16_t address )
+{
+  write_register ( SCI_WRAMADDR, address ) ;            // Start reading from WRAM
+  return read_register ( SCI_WRAM ) ;                   // Read back result
+}
+
+bool VS1053::testComm ( const char *header )
+{
+  // Test the communication with the VS1053 module.  The result wille be returned.
+  // If DREQ is low, there is problably no VS1053 connected.  Pull the line HIGH
+  // in order to prevent an endless loop waiting for this signal.  The rest of the
+  // software will still work, but readbacks from VS1053 will fail.
+  int       i ;                                         // Loop control
+  uint16_t  r1, r2, cnt = 0 ;
+  uint16_t  delta = 300 ;                               // 3 for fast SPI
+
+  if ( !digitalRead ( dreq_pin ) )
+  {
+    dbgprint ( "VS1053 not properly installed!" ) ;
+    // Allow testing without the VS1053 module
+    pinMode ( dreq_pin,  INPUT_PULLUP ) ;               // DREQ is now input with pull-up
+    return false ;                                      // Return bad result
+  }
+  // Further TESTING.  Check if SCI bus can write and read without errors.
+  // We will use the volume setting for this.
+  // Will give warnings on serial output if DEBUG is active.
+  // A maximum of 20 errors will be reported.
+  if ( strstr ( header, "Fast" ) )
+  {
+    delta = 3 ;                                         // Fast SPI, more loops
+  }
+  dbgprint ( header ) ;                                 // Show a header
+  for ( i = 0 ; ( i < 0xFFFF ) && ( cnt < 20 ) ; i += delta )
+  {
+    write_register ( SCI_VOL, i ) ;                     // Write data to SCI_VOL
+    r1 = read_register ( SCI_VOL ) ;                    // Read back for the first time
+    r2 = read_register ( SCI_VOL ) ;                    // Read back a second time
+    if  ( r1 != r2 || i != r1 || i != r2 )              // Check for 2 equal reads
+    {
+      dbgprint ( "VS1053 error retry SB:%04X R1:%04X R2:%04X", i, r1, r2 ) ;
+      cnt++ ;
+      delay ( 10 ) ;
+    }
+    yield() ;                                           // Allow ESP firmware to do some bookkeeping
+  }
+  return ( cnt == 0 ) ;                                 // Return the result
+}
+
+void VS1053::begin()
+{
+  pinMode      ( dreq_pin,  INPUT ) ;                   // DREQ is an input
+  pinMode      ( cs_pin,    OUTPUT ) ;                  // The SCI and SDI signals
+  pinMode      ( dcs_pin,   OUTPUT ) ;
+  digitalWrite ( dcs_pin,   HIGH ) ;                    // Start HIGH for SCI en SDI
+  digitalWrite ( cs_pin,    HIGH ) ;
+  delay ( 100 ) ;
+  dbgprint ( "Reset VS1053..." ) ;
+  digitalWrite ( dcs_pin,   LOW ) ;                     // Low & Low will bring reset pin low
+  digitalWrite ( cs_pin,    LOW ) ;
+  delay ( 2000 ) ;
+  dbgprint ( "End reset VS1053..." ) ;
+  digitalWrite ( dcs_pin,   HIGH ) ;                    // Back to normal again
+  digitalWrite ( cs_pin,    HIGH ) ;
+  delay ( 500 ) ;
+  // Init SPI in slow mode ( 0.2 MHz )
+  VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
+  //printDetails ( "Right after reset/startup" ) ;
+  delay ( 20 ) ;
+  //printDetails ( "20 msec after reset" ) ;
+  testComm ( "Slow SPI,Testing VS1053 read/write registers..." ) ;
+  // Most VS1053 modules will start up in midi mode.  The result is that there is no audio
+  // when playing MP3.  You can modify the board, but there is a more elegant way:
+  wram_write ( 0xC017, 3 ) ;                            // GPIO DDR = 3
+  wram_write ( 0xC019, 0 ) ;                            // GPIO ODATA = 0
+  delay ( 100 ) ;
+  //printDetails ( "After test loop" ) ;
+  softReset() ;                                         // Do a soft reset
+  // Switch on the analog parts
+  write_register ( SCI_AUDATA, 44100 + 1 ) ;            // 44.1kHz + stereo
+  // The next clocksetting allows SPI clocking at 5 MHz, 4 MHz is safe then.
+  write_register ( SCI_CLOCKF, 6 << 12 ) ;              // Normal clock settings multiplyer 3.0 = 12.2 MHz
+  //SPI Clock to 4 MHz. Now you can set high speed SPI clock.
+  VS1053_SPI = SPISettings ( 4000000, MSBFIRST, SPI_MODE0 ) ;
+  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_LINE1 ) ) ;
+  testComm ( "Fast SPI, Testing VS1053 read/write registers again..." ) ;
+  delay ( 10 ) ;
+  await_data_request() ;
+  endFillByte = wram_read ( 0x1E06 ) & 0xFF ;
+  dbgprint ( "endFillByte is %X", endFillByte ) ;
+  //printDetails ( "After last clocksetting" ) ;
+  delay ( 100 ) ;
+}
+
+void VS1053::setVolume ( uint8_t vol )
+{
+  // Set volume.  Both left and right.
+  // Input value is 0..100.  100 is the loudest.
+  // Clicking reduced by using 0xf8 to 0x00 as limits.
+  uint16_t value ;                                      // Value to send to SCI_VOL
+
+  if ( vol != curvol )
+  {
+    curvol = vol ;                                      // Save for later use
+    value = map ( vol, 0, 100, 0xFE, 0x00 ) ;           // 0..100% to one channel
+    value = ( value << 8 ) | value ;
+    write_register ( SCI_VOL, value ) ;                 // Volume left and right
+  }
+}
+
+void VS1053::setTone ( uint8_t *rtone )                 // Set bass/treble (4 nibbles)
+{
+  // Set tone characteristics.  See documentation for the 4 nibbles.
+  uint16_t value = 0 ;                                  // Value to send to SCI_BASS
+  int      i ;                                          // Loop control
+
+  for ( i = 0 ; i < 4 ; i++ )
+  {
+    value = ( value << 4 ) | rtone[i] ;                 // Shift next nibble in
+  }
+  write_register ( SCI_BASS, value ) ;                  // Tone settings
+  value = read_register ( SCI_BASS ) ;                  // Read back
+  dbgprint ( "BASS settings is %04X", value ) ;         // Print for TEST
+}
+
+uint8_t VS1053::getVolume()                             // Get the currenet volume setting.
+{
+  return curvol ;
+}
+
+void VS1053::startSong()
+{
+  sdi_send_fillers ( 10 ) ;
+}
+
+void VS1053::playChunk ( uint8_t* data, size_t len )
+{
+  sdi_send_buffer ( data, len ) ;
+}
+
+void VS1053::stopSong()
+{
+  uint16_t modereg ;                     // Read from mode register
+  int      i ;                           // Loop control
+
+  sdi_send_fillers ( 2052 ) ;
+  delay ( 10 ) ;
+  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
+  for ( i = 0 ; i < 200 ; i++ )
+  {
+    sdi_send_fillers ( 32 ) ;
+    modereg = read_register ( SCI_MODE ) ;  // Read status
+    if ( ( modereg & _BV ( SM_CANCEL ) ) == 0 )
+    {
+      sdi_send_fillers ( 2052 ) ;
+      dbgprint ( "Song stopped correctly after %d msec", i * 10 ) ;
+      return ;
+    }
+    delay ( 10 ) ;
+  }
+  printDetails ( "Song stopped incorrectly!" ) ;
+}
+
+void VS1053::softReset()
+{
+  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_RESET ) ) ;
+  delay ( 10 ) ;
+  await_data_request() ;
+}
+
+void VS1053::printDetails ( const char *header )
+{
+  uint16_t     regbuf[16] ;
+  uint8_t      i ;
+
+  dbgprint ( header ) ;
+  dbgprint ( "REG   Contents" ) ;
+  dbgprint ( "---   -----" ) ;
+  for ( i = 0 ; i <= SCI_num_registers ; i++ )
+  {
+    regbuf[i] = read_register ( i ) ;
+  }
+  for ( i = 0 ; i <= SCI_num_registers ; i++ )
+  {
+    delay ( 5 ) ;
+    dbgprint ( "%3X - %5X", i, regbuf[i] ) ;
+  }
+}
+
+void VS1053::adjustRate ( long ppm2 )
+{
+  write_register ( SCI_WRAMADDR, 0x1e07 ) ;
+  write_register ( SCI_WRAM,     ppm2 ) ;
+  write_register ( SCI_WRAM,     ppm2 >> 16 ) ;
+  // oldClock4KHz = 0 forces  adjustment calculation when rate checked.
+  write_register ( SCI_WRAMADDR, 0x5b1c ) ;
+  write_register ( SCI_WRAM,     0 ) ;
+  // Write to AUDATA or CLOCKF checks rate and recalculates adjustment.
+  write_register ( SCI_AUDATA,   read_register ( SCI_AUDATA ) ) ;
+}
+
+void VS1053::switchToMp3Mode()
+{
+    wram_write ( 0xC017, 3 ) ; // GPIO DDR = 3
+    wram_write ( 0xC019, 0 ) ; // GPIO ODATA = 0
+    delay ( 100 ) ;
+    softReset();
+}
+
+uint16_t VS1053::getChipVersion()
+{
+    uint16_t status = read_register ( SCI_STATUS ) ;
+    return ( (status & 0x00F0) >> 4);
+}
+
+void VS1053::loadUserCode ( const unsigned short* plugin, unsigned short plugin_size )
+{
+    int i = 0;
+    while (i<plugin_size)
+    {
+        unsigned short addr, n, val;
+        addr = plugin[i++];
+        n = plugin[i++];
+        if (n & 0x8000U)
+        {
+            n &= 0x7FFF;
+            val = plugin[i++];
+            while (n--)
+            {
+                write_register ( addr, val ) ;
+            }
+        }
+        else
+        {
+            while (n--)
+            {
+                val = plugin[i++];
+                write_register ( addr, val ) ;
+            }
+        }
+    }
+}
+
+/**
+ * Load the latest generic firmware patch
+ */
+void VS1053::loadDefaultVs1053Patches()
+{
+   loadUserCode ( PATCHES, PATCHES_SIZE ) ;
+};
 
 // The object for the MP3 player
 VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
@@ -350,15 +789,14 @@ LCD2004* lcd = NULL ;
 
 bool dsp_begin()
 {
-  dbgprint ( "Init LCD2004: I2C SDA, SCL pins %d, %d", SDA_PIN, SCL_PIN ) ;
-  
-  if ( ( SDA_PIN >= 0 ) && ( SCL_PIN >= 0 ) )
+  dbgprint ( "Init I2C LCD2004: SDA on GPIO %d, SCL on GPIO %d", SDA_PIN, SCL_PIN ) ;
+  if ( ( SDA_PIN == 4 ) && ( SCL_PIN == 5 ) )               // Make sure correct pins are used
   {
     lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;                // Create an instance for LCD
   }
   else
   {
-    dbgprint ( "Init LCD2004 failed!" ) ;
+    dbgprint ( "Init I2C LCD2004 failed!" ) ;
   }
   return ( lcd != NULL ) ;
 }
@@ -516,14 +954,11 @@ void LCD2004::reset()
 LCD2004::LCD2004 ( uint8_t sda, uint8_t scl )
 {
   Wire.begin ( sda, scl ) ;
-  delay ( 10 ) ;
-  Wire.setClock ( 100000UL ) ;                        // Experimental! ESP8266 i2c bus speed: 
-                                                      // 100kHz..400kHz/100000UL..400000UL, default 100000UL
-  Wire.setClockStretchLimit ( 230 ) ;                 // Experimental! default 230
+  delay ( 50 ) ;
   Wire.beginTransmission ( I2C_ADDRESS ) ;
   if ( Wire.endTransmission() != 0 )
   {
-    dbgprint ( "LCD2004 connection error!" ) ;        // Safety check, make sure the PCF8574 is connected
+    dbgprint ( "LCD2004 connection error!" ) ;          // Safety check, make sure the PCF8574 is connected
   }
   reset() ;
 }
@@ -784,19 +1219,19 @@ void displayinfo ( const char *str, int pos )
 //**************************************************************************************************
 bool getLocalTime ( struct tm * info, uint32_t ms )
 {
-    uint32_t start = millis();
-    time_t now;
-    while ( ( millis()-start ) <= ms )
+  uint32_t start = millis();
+  time_t now;
+  while ( ( millis()-start ) <= ms )
+  {
+    time ( &now ) ;
+    localtime_r ( &now, info ) ;
+    if ( info->tm_year > ( 2016 - 1900 ) )
     {
-      time ( &now ) ;
-      localtime_r ( &now, info ) ;
-      if ( info->tm_year > ( 2016 - 1900 ) )
-      {
-        return true;
-      }
-      delay ( 10 ) ;
+      return true;
     }
-    return false;
+    delay ( 10 ) ;
+  }
+  return false;
 }
 
 void gettime()
@@ -819,7 +1254,10 @@ void gettime()
       {
         dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
       }
-      dbgprint ( "Sync TOD" ) ;
+      else
+      {
+        dbgprint ( "Sync TOD" ) ;
+      }
       if ( !getLocalTime ( &timeinfo, 5000 ) )              // Read from NTP server
       {
         dbgprint ( "Failed to obtain time!" ) ;             // Error
@@ -850,7 +1288,6 @@ void gettime()
 //******************************************************************************************
 // Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
 //******************************************************************************************
-
 uint32_t spiTransfer32 ( uint32_t data )
 {
   union { uint32_t val; struct { uint16_t lsb; uint16_t msb; }; } in, out;
@@ -860,33 +1297,31 @@ uint32_t spiTransfer32 ( uint32_t data )
   return out.val;
 }
 
-
 void spiramWrite ( uint32_t addr, uint8_t *buff, uint32_t size )
 {
   int i = 0;
   while ( size-- )
   {
-      SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
-      digitalWrite ( SRAM_CS, LOW ) ;
-      spiTransfer32 ( (0x02<<24)|(addr++&0x00ffffff) ) ;   // Set write mode
-      SPI.transfer ( buff[i++] ) ;
-      digitalWrite ( SRAM_CS, HIGH ) ;
-      SPI.endTransaction();  
+    SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+    digitalWrite ( SRAM_CS, LOW ) ;
+    spiTransfer32 ( (0x02<<24)|(addr++&0x00ffffff) ) ;   // Set write mode
+    SPI.transfer ( buff[i++] ) ;
+    digitalWrite ( SRAM_CS, HIGH ) ;
+    SPI.endTransaction();
   }
 }
-
 
 void spiramRead ( uint32_t addr, uint8_t *buff, uint32_t size )
 {
   int i = 0;
   while ( size-- )
   {
-      SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
-      digitalWrite ( SRAM_CS, LOW ) ;
-      spiTransfer32 ( (0x03<<24)|(addr++&0x00ffffff) ) ;   // Set read mode
-      buff[i++] = SPI.transfer ( 0x00 );
-      digitalWrite ( SRAM_CS, HIGH ) ;
-      SPI.endTransaction();  
+    SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+    digitalWrite ( SRAM_CS, LOW ) ;
+    spiTransfer32 ( (0x03<<24)|(addr++&0x00ffffff) ) ;   // Set read mode
+    buff[i++] = SPI.transfer ( 0x00 );
+    digitalWrite ( SRAM_CS, HIGH ) ;
+    SPI.endTransaction();
   }
 }
 
@@ -920,7 +1355,7 @@ uint16_t dataAvailable()
 //******************************************************************************************
 uint16_t getFreeBufferSpace()
 {
-  return ( SRAM_CH_SIZE - chcount ) ;                // Return number of chuinks available
+  return ( SRAM_CH_SIZE - chcount ) ;                   // Return number of chunks available
 }
 
 
@@ -932,7 +1367,7 @@ uint16_t getFreeBufferSpace()
 //******************************************************************************************
 void bufferWrite ( uint8_t *b )
 {
-  spiramWrite ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ; // Put byte in SRAM
+  spiramWrite ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // Put byte in SRAM
   writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
   chcount++ ;                                           // Count number of chunks
 }
@@ -946,7 +1381,7 @@ void bufferWrite ( uint8_t *b )
 //******************************************************************************************
 void bufferRead ( uint8_t *b )
 {
-  spiramRead ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // return next chunk
+  spiramRead ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;   // return next chunk
   readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
   chcount-- ;                                          // Count is now one less
 }
@@ -957,7 +1392,7 @@ void bufferRead ( uint8_t *b )
 //******************************************************************************************
 void bufferReset()
 {
-  readinx = 0 ;                                     // Reset ringbuffer administration
+  readinx = 0 ;                                        // Reset ringbuffer administration
   writeinx = 0 ;
   chcount = 0 ;
 }
@@ -999,9 +1434,9 @@ void spiramSetup()
 inline bool ringspace()
 {
   #if defined ( SPIRAM )
-    return spaceAvailable() ;         // True if at least 1 chunk available
+    return spaceAvailable() ;         // True if at least one chunk is available
   #else
-    return ( rcount < RINGBFSIZ ) ;   // True is at least one byte of free space is available
+    return ( rcount < RINGBFSIZ ) ;   // True if at least one byte of free space is available
   #endif
 }
 
@@ -1038,7 +1473,7 @@ void putring ( uint8_t b )              // Put one byte in the ringbuffer
     *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
     if ( ++rbwindex == RINGBFSIZ )      // Increment pointer and
     {
-      rbwindex = 0 ;                    // wrap at end
+      rbwindex = 0 ;                    // wrap at the end
     }
     rcount++ ;                          // Count number of bytes in the
   #endif
@@ -1063,10 +1498,10 @@ uint8_t getring()
   #else
     if ( ++rbrindex == RINGBFSIZ )        // Increment pointer and
     {
-      rbrindex = 0 ;                      // wrap at end
+      rbrindex = 0 ;                      // wrap at the end
     }
     rcount-- ;                            // Count is now one less
-    return *(ringbuf + rbrindex) ;        // return the oldest byte
+    return *(ringbuf + rbrindex) ;        // Return the oldest byte
   #endif
 }
 
@@ -1197,18 +1632,21 @@ void listNetworks()
 // If totalcount has not been changed, there is a problem and playing will stop.           *
 // Note that a "yield()" within this routine or in called functions will cause a crash!    *
 //******************************************************************************************
-void timer10sec()
+void IRAM_ATTR timer10sec()
 {
   static uint32_t oldtotalcount = 7321 ;          // Needed for change detection
   static uint8_t  morethanonce = 0 ;              // Counter for succesive fails
   static uint8_t  t600 = 0 ;                      // Counter for 10 minutes
+  uint32_t        bytesplayed ;                   // Bytes send to MP3 converter
 
   if ( datamode & ( INIT | HEADER | DATA |        // Test op playing
                     METADATA | PLAYLISTINIT |
                     PLAYLISTHEADER |
                     PLAYLISTDATA ) )
   {
-    if ( totalcount == oldtotalcount )            // Still playing?
+    bytesplayed = totalcount - oldtotalcount ;    // Nunber of bytes played in the 10 seconds
+    oldtotalcount = totalcount ;                  // Save for comparison in next cycle
+    if ( bytesplayed == 0 )                       // Still playing?
     {
       dbgprint ( "No data input" ) ;              // No data detected!
       if ( morethanonce > 10 )                    // Happened too many times?
@@ -1233,6 +1671,10 @@ void timer10sec()
     }
     else
     {
+      // Data has been send to MP3 decoder
+      // Bitrate in kbits/s is bytesplayed / 10 / 1000 * 8
+      mbitrate = ( bytesplayed + 625 ) / 1250 ;   // Measured bitrate
+      morethanonce = 0 ;                          // Data seen, reset failcounter
       if ( morethanonce )                         // Recovered from data loss?
       {
         dbgprint ( "Recovered from dataloss" ) ;
@@ -1243,7 +1685,7 @@ void timer10sec()
     if ( t600++ == 60 )                           // 10 minutes over?
     {
       t600 = 0 ;                                  // Yes, reset counter
-      dbgprint ( "10 minutes over" ) ;
+      //dbgprint ( "10 minutes over" ) ;
       publishIP() ;                               // Re-publish IP
     }
   }
@@ -1339,13 +1781,12 @@ void testfile ( String fspec )
 //******************************************************************************************
 // Examine button every 100 msec.                                                          *
 //******************************************************************************************
-void timer100()
+void IRAM_ATTR timer100()
 {
   static int     count10sec = 0 ;                 // Counter for activate 10 seconds process
   uint16_t       v ;                              // Analog input value 0..1023
   static uint8_t aoldval = 0 ;                    // Previous value of analog input switch
   uint8_t        anewval ;                        // New value of analog input switch (0..3)
-  uint8_t        oldvol ;
 
   if ( ++count10sec == 100  )                     // 10 seconds passed?
   {
@@ -1394,110 +1835,6 @@ void timer100()
       }
     }
   }
-// Check for and execute new IR remote control commands
-#if defined ( IR )
-  if (irrecv.decode(&decodedIRCommand))
-  {
-    dbgprint ("IR Command received");
-    oldvol = vs1053player.getVolume();
-    if (decodedIRCommand.value == IR_VOLDOWN)
-    {
-      oldvol = vs1053player.getVolume();
-      ini_block.reqvol = oldvol - 2;
-      dbgprint ("Volume now is %d", ini_block.reqvol);
-    }
-    if (decodedIRCommand.value == IR_VOLUP)
-    {
-      oldvol = vs1053player.getVolume();
-      ini_block.reqvol = oldvol + 2;
-      dbgprint ("Volume now is %d", ini_block.reqvol);
-    }
-    if (ini_block.reqvol < 0) ini_block.reqvol = 0;
-    if (ini_block.reqvol > 100) ini_block.reqvol = 100;
-
-    if (decodedIRCommand.value == IR_PREV)
-    {
-      ini_block.newpreset = currentpreset - 1;
-      dbgprint ("IR Command: previous station");
-    }
-    if (decodedIRCommand.value == IR_NEXT)
-    {
-      ini_block.newpreset = currentpreset + 1;
-      dbgprint ("IR Command: next radio station");
-    }
-    if (decodedIRCommand.value == IR_MUTE)
-    {
-      muteflag = !muteflag;
-      dbgprint ("IR Command: mute");
-    }
-    if (decodedIRCommand.value == IR_POWER)
-    {
-      analyzeCmd("reset");
-      dbgprint ("IR Command: reset");
-    }
-    if (decodedIRCommand.value == IR_PLAY)
-    {
-      analyzeCmd("resume");
-      dbgprint ("IR Command: resume");
-    }
-    if (decodedIRCommand.value == IR_STOP)
-    {
-      analyzeCmd("stop");
-      dbgprint ("IR Command: stop");
-    }
-    if (decodedIRCommand.value == IR_PRESET00)
-    {
-      ini_block.newpreset = 0;
-      dbgprint ("IR Command: preset_00");
-    }
-    if (decodedIRCommand.value == IR_PRESET01)
-    {
-      ini_block.newpreset = 1;
-      dbgprint ("IR Command: preset_01");
-    }
-    if (decodedIRCommand.value == IR_PRESET02)
-    {
-      ini_block.newpreset = 2;
-      dbgprint ("IR Command: preset_02");
-    }
-    if (decodedIRCommand.value == IR_PRESET03)
-    {
-      ini_block.newpreset = 3;
-      dbgprint ("IR Command: preset_03");
-    }
-    if (decodedIRCommand.value == IR_PRESET04)
-    {
-      ini_block.newpreset = 4;
-      dbgprint ("IR Command: preset_04");
-    }
-    if (decodedIRCommand.value == IR_PRESET05)
-    {
-      ini_block.newpreset = 5;
-      dbgprint ("IR Command: preset_05");
-    }
-    if (decodedIRCommand.value == IR_PRESET06)
-    {
-      ini_block.newpreset = 6;
-      dbgprint ("IR Command: preset_06");
-    }
-    if (decodedIRCommand.value == IR_PRESET07)
-    {
-      ini_block.newpreset = 7;
-      dbgprint ("IR Command: preset_07");
-    }
-    if (decodedIRCommand.value == IR_PRESET08)
-    {
-      ini_block.newpreset = 8;
-      dbgprint ("IR Command: preset_08");
-    }
-    if (decodedIRCommand.value == IR_PRESET09)
-    {
-      ini_block.newpreset = 9;
-      dbgprint ("IR Command: preset_09");
-    }
-    irrecv.resume();  // Get ready to receive next IR command
-  }
-#endif
 }
 
 
@@ -1542,7 +1879,7 @@ void showstreamtitle ( const char *ml, bool full )
     icystreamtitle = "" ;                       // Unknown type
     return ;                                    // Do not show
   }
-  // Save for status request from browser ;
+  // Save for status request from browser and for MQTT
   icystreamtitle = streamtitle ;
   if ( ( p1 = strstr ( streamtitle, " - " ) ) ) // look for artist/title separator
   {
@@ -2216,6 +2553,115 @@ String xmlparse ( String mount )
   return String ( tmpstr ) ;                           // Return final streaming URL.
 }
 
+#if defined ( IR )
+//**************************************************************************************************
+//                                     S C A N I R                                                 *
+//**************************************************************************************************
+// See if IR input is available.  Execute the programmed command.                                  *
+//**************************************************************************************************
+void scanIR()
+{
+  uint8_t        oldvol ;
+
+  if ( irrecv.decode ( &decodedIRCommand ) )
+  {
+    dbgprint ( "IR Command received" ) ;
+    oldvol = vs1053player.getVolume();
+    if ( decodedIRCommand.value == IR_VOLDOWN )
+    {
+      oldvol = vs1053player.getVolume();
+      ini_block.reqvol = oldvol - 2;
+      dbgprint ( "Volume now is %d", ini_block.reqvol ) ;
+    }
+    if ( decodedIRCommand.value == IR_VOLUP )
+    {
+      oldvol = vs1053player.getVolume();
+      ini_block.reqvol = oldvol + 2;
+      dbgprint ( "Volume now is %d", ini_block.reqvol ) ;
+    }
+    if ( ini_block.reqvol < 0 ) ini_block.reqvol = 0;
+    if ( ini_block.reqvol > 100 ) ini_block.reqvol = 100;
+
+    if ( decodedIRCommand.value == IR_PREV )
+    {
+      ini_block.newpreset = currentpreset - 1;
+      dbgprint ( "IR Command: previous station" ) ;
+    }
+    if ( decodedIRCommand.value == IR_NEXT )
+    {
+      ini_block.newpreset = currentpreset + 1;
+      dbgprint ( "IR Command: next radio station" ) ;
+    }
+    if ( decodedIRCommand.value == IR_MUTE )
+    {
+      muteflag = !muteflag;
+      dbgprint ( "IR Command: mute" ) ;
+    }
+    if ( decodedIRCommand.value == IR_PLAY )
+    {
+      analyzeCmd("resume") ;
+      dbgprint ( "IR Command: resume" ) ;
+    }
+    if ( decodedIRCommand.value == IR_STOP )
+    {
+      analyzeCmd("stop");
+      dbgprint ("IR Command: stop");
+    }
+    if (decodedIRCommand.value == IR_PRESET00)
+    {
+      ini_block.newpreset = 0;
+      dbgprint ("IR Command: preset_00");
+    }
+    if (decodedIRCommand.value == IR_PRESET01)
+    {
+      ini_block.newpreset = 1;
+      dbgprint ("IR Command: preset_01");
+    }
+    if (decodedIRCommand.value == IR_PRESET02)
+    {
+      ini_block.newpreset = 2;
+      dbgprint ("IR Command: preset_02");
+    }
+    if (decodedIRCommand.value == IR_PRESET03)
+    {
+      ini_block.newpreset = 3;
+      dbgprint ("IR Command: preset_03");
+    }
+    if (decodedIRCommand.value == IR_PRESET04)
+    {
+      ini_block.newpreset = 4;
+      dbgprint ("IR Command: preset_04");
+    }
+    if (decodedIRCommand.value == IR_PRESET05)
+    {
+      ini_block.newpreset = 5;
+      dbgprint ("IR Command: preset_05");
+    }
+    if (decodedIRCommand.value == IR_PRESET06)
+    {
+      ini_block.newpreset = 6;
+      dbgprint ("IR Command: preset_06");
+    }
+    if (decodedIRCommand.value == IR_PRESET07)
+    {
+      ini_block.newpreset = 7;
+      dbgprint ("IR Command: preset_07");
+    }
+    if (decodedIRCommand.value == IR_PRESET08)
+    {
+      ini_block.newpreset = 8;
+      dbgprint ("IR Command: preset_08");
+    }
+    if (decodedIRCommand.value == IR_PRESET09)
+    {
+      ini_block.newpreset = 9;
+      dbgprint ("IR Command: preset_09");
+    }
+    irrecv.resume();  // Get ready to receive next IR command
+  }
+}
+#endif
+
 
 //******************************************************************************************
 //                                   S E T U P                                             *
@@ -2247,6 +2693,9 @@ void setup()
   ini_block.mqttpasswd = "" ;
   ini_block.mqtttopic  = "" ;
   ini_block.mqttpubtopic = "" ;
+  ini_block.clk_server = "pool.ntp.org" ;              // Default server for NTP
+  ini_block.clk_offset = 0 ;                           // Default UTC time zone
+  ini_block.clk_dst = 1 ;                              // DST is +1 hour
   ini_block.reqvol       = 0 ;
   memset ( ini_block.rtone, 0, 4 )  ;
   ini_block.newpreset    = 0 ;
@@ -2288,8 +2737,11 @@ void setup()
 #if defined ( IR )
   irrecv.enableIRIn();                                 // Enable IR receiver
 #endif
-vs1053player.begin() ;                                 // Initialize VS1053 player
-vs1053player.loadDefaultVs1053Patches();               // Load default patch set for VS1053
+  vs1053player.begin() ;                               // Initialize VS1053 player
+  if ( vs1053player.getChipVersion() == 4 )            // Check if we are using VS1053B chip
+  { 
+    vs1053player.loadDefaultVs1053Patches();           // Then load default patch set 
+  }
 #if defined ( LCD )
   dsp_begin();
   displayinfo ( "      Esp-radio     ", 0 ) ;
@@ -2341,7 +2793,9 @@ vs1053player.loadDefaultVs1053Patches();               // Load default patch set
     currentpreset = ini_block.newpreset ;              // No network: do not start radio
   }
   delay ( 1000 ) ;                                     // Show IP for a while
-  configTime ( TZ * 3600, DST * 3600, NTP_SERVER ) ;   // GMT offset, daylight offset in seconds
+  configTime ( ini_block.clk_offset * 3600,
+               ini_block.clk_dst * 3600,
+               ini_block.clk_server.c_str() ) ;        // GMT offset, daylight offset in seconds
   timeinfo.tm_year = 0 ;                               // Set TOD to illegal
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
   if ( NetworkFound )
@@ -2566,6 +3020,9 @@ void loop()
   #endif
   scanserial() ;                                       // Handle serial input
   ArduinoOTA.handle() ;                                // Check for OTA
+  #if defined ( IR )
+    scanIR() ;                                         // See if IR input
+  #endif
 }
 
 
@@ -2632,6 +3089,21 @@ bool chkhdrline ( const char* str )
     }
   }
   return false ;                                      // End of string without colon
+}
+
+
+//**************************************************************************************************
+//                            S C A N _ C O N T E N T _ L E N G T H                                *
+//**************************************************************************************************
+// If the line contains content-length information: set clength (content length counter).          *
+//**************************************************************************************************
+void scan_content_length ( const char* metalinebf )
+{
+  if ( strstr ( metalinebf, "Content-Length" ) )      // Line contains content length
+  {
+    clength = atoi ( metalinebf + 15 ) ;              // Yes, set clength
+    dbgprint ( "Content-Length is %d", clength ) ;    // Show for debugging purposes
+  }
 }
 
 
@@ -2776,17 +3248,19 @@ void handlebyte ( uint8_t b, bool force )
           if ( lcml.indexOf ( "http://" ) > 8 )        // Redirection with http://?
           {
             host = metaline.substring ( 17 ) ;         // Yes, get new URL
+            hostreq = true ;
           }
           else if ( lcml.indexOf ( "https://" ) )      // Redirection with ttps://?
           {
             host = metaline.substring ( 18 ) ;         // Yes, get new URL
+            hostreq = true ;
           }
-          hostreq = true ;
         }
         if ( lcml.indexOf ( "content-type" ) >= 0 )    // Line with "Content-Type: xxxx/yyy"
         {
           ctseen = true ;                              // Yes, remember seeing this
-          ct = metaline.substring ( 14 ) ;             // Set contentstype. Not used yet
+          String ct = metaline.substring ( 14 ) ;      // Set contentstype. Not used yet
+          ct.trim() ;
           dbgprint ( "%s seen.", ct.c_str() ) ;
         }
         if ( lcml.startsWith ( "icy-br:" ) )
@@ -2826,7 +3300,7 @@ void handlebyte ( uint8_t b, bool force )
         {
           dbgprint ( "Switch to DATA, bitrate is %d"   // Show bitrate
                       ", metaint is %d",               // and metaint
-                    bitrate, metaint ) ;
+                      mbitrate, metaint ) ;
           datamode = DATA ;                            // Expecting data now
           #if defined ( SPIRAM )
             spiramdelay = SPIRAMDELAY ;                // Start delay
@@ -2905,13 +3379,14 @@ void handlebyte ( uint8_t b, bool force )
          ( b == '\r' ) ||                              // Ignore CR
          ( b == '\0' ) )                               // Ignore NULL
     {
-      // Yes, ignore
+      return ;                                         // Quick return
     }
     else if ( b == '\n' )                              // Linefeed ?
     {
       LFcount++ ;                                      // Count linefeeds
       dbgprint ( "Playlistheader: %s",                 // Show playlistheader
                  metaline.c_str() ) ;
+      scan_content_length ( metaline.c_str() ) ;       // Check if it is a content-length line
       metaline = "" ;                                  // Ready for next line
       if ( LFcount == 2 )
       {
@@ -3355,7 +3830,7 @@ char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-    #if defined ( SPIRAM )                            // SPI RAM use?         
+    #if defined ( SPIRAM )                            // SPI RAM used?
       rcount = dataAvailable() ;                      // Yes, get free space
     #endif
     if ( mp3client )
@@ -3395,6 +3870,21 @@ char* analyzeCmd ( const char* par, const char* val )
   else if ( argument == "rate" )                      // Rate command?
   {
     vs1053player.adjustRate ( ivalue ) ;              // Yes, adjust
+  }
+  else if ( argument.startsWith ( "clk" ) )           // Parameter fo NTP?
+  {
+    if ( argument.indexOf ( "server" ) > 0 )          // Server specified?
+    {
+      ini_block.clk_server = value.c_str() ;          // Yes, set NTP server accordingly
+    }
+    else if ( argument.indexOf ( "offset" ) > 0 )     // Offset specified?
+    {
+      ini_block.clk_offset = ivalue ;                 // Yes, set offset 
+    }
+    else if ( argument.indexOf ( "dst" ) > 0 )        // DST specified?
+    {
+      ini_block.clk_dst = ivalue ;                    // Yes, set DST accordingly
+    }
   }
   else if ( argument.startsWith ( "mqtt" ) )          // Parameter fo MQTT?
   {
