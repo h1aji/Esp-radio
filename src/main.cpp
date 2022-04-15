@@ -133,6 +133,8 @@ void   XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
                     char* data,  uint16_t dataLen ) ;
 bool   connecttohost() ;
 void   gettime() ;
+char   utf8ascii ( char ascii ) ;                  // Convert UTF8 char to normal char
+void   utf8ascii_ip ( char* s ) ;                  // In place conversion full string
 String utf8ascii ( const char* s ) ;
 void   scan_content_length ( const char* metalinebf ) ;
 
@@ -1130,6 +1132,7 @@ void displaytime ( const char* str )
   dsp_update_line ( 0 ) ;
 }
 
+
 //******************************************************************************************
 //                              U T F 8 A S C I I                                          *
 //******************************************************************************************
@@ -1137,12 +1140,12 @@ void displaytime ( const char* str )
 // Convert a single Character from UTF8 to Extended ASCII.                                 *
 // Return "0" if a byte has to be ignored.                                                 *
 //******************************************************************************************
-byte utf8ascii ( byte ascii )
+char utf8ascii ( char ascii )
 {
-  static const byte lut_C3[] = 
-         { "AAAAAAACEEEEIIIIDNOOOOO#0UUUU###aaaaaaaceeeeiiiidnooooo##uuuuyyy" } ;
-  static byte       c1 ;              // Last character buffer
-  byte              res = 0 ;         // Result, default 0
+  static const char lut_C3[] = { "AAAAAAACEEEEIIIIDNOOOOO#0UUUU###"
+                                 "aaaaaaaceeeeiiiidnooooo##uuuuyyy" } ;
+  static char       c1 ;              // Last character buffer
+  char              res = '\0' ;      // Result, default 0
 
   if ( ascii <= 0x7F )                // Standard ASCII-set 0..0x7F handling
   {
@@ -1152,15 +1155,15 @@ byte utf8ascii ( byte ascii )
   else
   {
     switch ( c1 )                     // Conversion depending on first UTF8-character
-    {   
+    {
       case 0xC2: res = '~' ;
-                 break ;
-      case 0xC3: res = lut_C3[ascii-128] ;
-                 break ;
+        break ;
+      case 0xC3: res = lut_C3[ascii - 128] ;
+        break ;
       case 0x82: if ( ascii == 0xAC )
-                 {
-                    res = 'E' ;       // Special case Euro-symbol
-                 }
+        {
+          res = 'E' ;                 // Special case Euro-symbol
+        }
     }
     c1 = ascii ;                      // Remember actual character
   }
@@ -1169,11 +1172,11 @@ byte utf8ascii ( byte ascii )
 
 
 //******************************************************************************************
-//                              U T F 8 A S C I I                                          *
+//                              U T F 8 A S C I I _ I P                                    *
 //******************************************************************************************
 // In Place conversion UTF8-string to Extended ASCII (ASCII is shorter!).                  *
 //******************************************************************************************
-void utf8ascii ( char* s )
+void utf8ascii_ip ( char* s )
 {
   int  i, k = 0 ;                     // Indexes for in en out string
   char c ;
@@ -1190,6 +1193,29 @@ void utf8ascii ( char* s )
 }
 
 
+//**************************************************************************************************
+//                                      U T F 8 A S C I I                                          *
+//**************************************************************************************************
+// Conversion UTF8-String to Extended ASCII String.                                                *
+//**************************************************************************************************
+String utf8ascii ( const char* s )
+{
+  int  i ;                            // Index for input string
+  char c ;
+  String res = "" ;                   // Result string
+
+  for ( i = 0 ; s[i] ; i++ )          // For every input character
+  {
+    c = utf8ascii ( s[i] ) ;          // Translate if necessary
+    if ( c )                          // Good translation?
+    {
+      res += String ( c ) ;           // Yes, put in output string
+    }
+  }
+  return res ;
+}
+
+
 //******************************************************************************************
 //                              D I S P L A Y I N F O                                      *
 //******************************************************************************************
@@ -1200,7 +1226,7 @@ void displayinfo ( const char *str, int pos )
   char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
 
   strcpy ( buf, str ) ;                         // Make a local copy of the string
-  utf8ascii ( buf ) ;                           // Convert possible UTF8
+  utf8ascii_ip ( buf ) ;                        // Convert possible UTF8
   dline[pos].str = buf ;                        // Write o buffer
   dsp_update_line ( pos ) ;                     // Show on display
 }
@@ -1318,7 +1344,7 @@ void spiramRead ( uint32_t addr, uint8_t *buff, uint32_t size )
     SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
     digitalWrite ( SRAM_CS, LOW ) ;
     spiTransfer32 ( (0x03<<24)|(addr++&0x00ffffff) ) ;   // Set read mode
-    buff[i++] = SPI.transfer ( 0x00 );
+    buff[i++] = SPI.transfer ( 0x00 ) ;
     digitalWrite ( SRAM_CS, HIGH ) ;
     SPI.endTransaction();
   }
@@ -2700,7 +2726,7 @@ void scanIR()
       {        
         ini_block.reqvol = vs1053player.getVolume() - 2 ;
       }
-      dbgprint ( "IR code %04X - ir_voldwon", ir_value ) ;
+      dbgprint ( "IR code %04X - ir_voldown", ir_value ) ;
     }
     else if ( ir_value == ir_mute )
     {
@@ -2709,17 +2735,17 @@ void scanIR()
     }
     else if ( ir_value == ir_next )
     {
-      ini_block.newpreset = currentpreset + 1;
+      ini_block.newpreset = currentpreset + 1 ;
       dbgprint ( "IR code %04X - ir_next", ir_value ) ;
     }
     else if ( ir_value == ir_prev )
     {
-      ini_block.newpreset = currentpreset - 1;
+      ini_block.newpreset = currentpreset - 1 ;
       dbgprint ( "IR code %04X - ir_prev", ir_value ) ;
     }
     else
     {
-      dbgprint ( "IR code %04X received, but not found in preferences!  Timing %d/%d",
+      dbgprint ( "IR code %04X received, but not found in the configuration! Timing %d/%d",
                  ir_value, ir_0, ir_1 ) ;
     }
     ir_value = 0 ;                                          // Reset IR code received
@@ -3860,6 +3886,7 @@ char* analyzeCmd ( const char* par, const char* val )
     sprintf ( reply,
               "New preset station %s accepted",       // Format reply
               host.c_str() ) ;
+    utf8ascii_ip ( reply ) ;                          // Remove possible strange characters
   }
   else if ( argument == "xml" )
   {
@@ -3873,6 +3900,7 @@ char* analyzeCmd ( const char* par, const char* val )
     sprintf ( reply,
               "New xml preset station %s accepted",   // Format reply
               host.c_str() ) ;
+    utf8ascii_ip ( reply ) ;                          // Remove possible strange characters
   }
   else if ( argument == "status" )                    // Status request
   {
