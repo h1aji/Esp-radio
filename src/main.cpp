@@ -17,7 +17,6 @@
 #include <time.h>
 
 #include <AsyncMqttClient.h>
-#include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <TinyXML.h>
 
@@ -61,7 +60,7 @@ extern "C"
   #define SPIRAMDELAY       100000
 #else
   // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-  #define RINGBFSIZ         16000
+  #define RINGBFSIZ         18000
 #endif
 //
 // Debug buffer size
@@ -86,35 +85,28 @@ extern "C"
   #define I2C_ADDRESS 0x27
 #endif
 //
-// Support for IR remote control for station and volume control through IRremoteESP8266 library
-// Enable support for IRremote by uncommenting the next line and setting IR_PIN and the IR_ commands
+// Enable support for IR by uncommenting the next line
 #define IR
 #if defined ( IR )
-  #include <IRremoteESP8266.h>
-  #include <IRrecv.h>
-  #include <IRutils.h>
-  // IR receiver pin set to GPIO 0
-  uint16_t IR_PIN = 0;
-  IRrecv irrecv ( IR_PIN ) ;
-  decode_results decodedIRCommand ;
-  // IRremote button definitions
-  #define IR_VOLDOWN    0xFF4AB5
-  #define IR_VOLUP      0xFF18E7
-  #define IR_PREV       0xFF10EF
-  #define IR_NEXT       0xFF5AA5
-  #define IR_MUTE       0xFF38C7
-  #define IR_STOP       0xFF6897 // *
-  #define IR_PLAY       0xFFB04F // #
-  #define IR_PRESET00   0xFF9867
-  #define IR_PRESET01   0xFFA25D
-  #define IR_PRESET02   0xFF629D
-  #define IR_PRESET03   0xFFE21D
-  #define IR_PRESET04   0xFF22DD
-  #define IR_PRESET05   0xFF02FD
-  #define IR_PRESET06   0xFFC23D
-  #define IR_PRESET07   0xFFE01F
-  #define IR_PRESET08   0xFFA857
-  #define IR_PRESET09   0xFF906F
+// Set IR pin to GPIO 0
+  #define IR_PIN      0
+  uint16_t       ir_preset1 = 0xA25D ;
+  uint16_t       ir_preset2 = 0x629D ;
+  uint16_t       ir_preset3 = 0xE21D ;
+  uint16_t       ir_preset4 = 0x22DD ;
+  uint16_t       ir_preset5 = 0x02FD ;
+  uint16_t       ir_preset6 = 0xC23D ;
+  uint16_t       ir_preset7 = 0xE01F ;
+  uint16_t       ir_preset8 = 0xA857 ;
+  uint16_t       ir_preset9 = 0x906F ;
+  uint16_t       ir_preset0 = 0x9867 ;
+  uint16_t       ir_stop    = 0xB04F ; // #
+  uint16_t       ir_play    = 0x6897 ; // *
+  uint16_t       ir_volup   = 0x18E7 ;
+  uint16_t       ir_voldown = 0x4AB5 ;
+  uint16_t       ir_mute    = 0x38C7 ;
+  uint16_t       ir_next    = 0x5AA5 ;
+  uint16_t       ir_prev    = 0x10EF ;
 #endif
 
 
@@ -140,6 +132,8 @@ void   XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
                     char* data,  uint16_t dataLen ) ;
 bool   connecttohost() ;
 void   gettime() ;
+char   utf8ascii ( char ascii ) ;                  // Convert UTF8 char to normal char
+void   utf8ascii_ip ( char* s ) ;                  // In place conversion full string
 String utf8ascii ( const char* s ) ;
 void   scan_content_length ( const char* metalinebf ) ;
 
@@ -236,6 +230,12 @@ struct tm        timeinfo ;                                // Will be filled by 
 char             timetxt[9] ;                              // Converted timeinfo
 bool             time_req = false ;                        // Set time requested
 uint32_t         clength ;                                 // Content length found in http header
+#if defined ( IR )
+  int              ir_intcount = 0 ;                       // For test IR interrupts
+  uint16_t         ir_value = 0 ;                          // IR code
+  uint32_t         ir_0 = 550 ;                            // Average duration of an IR short pulse
+  uint32_t         ir_1 = 1650 ;                           // Average duration of an IR long pulse
+#endif
 
 // XML parse globals.
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -1131,6 +1131,7 @@ void displaytime ( const char* str )
   dsp_update_line ( 0 ) ;
 }
 
+
 //******************************************************************************************
 //                              U T F 8 A S C I I                                          *
 //******************************************************************************************
@@ -1138,12 +1139,12 @@ void displaytime ( const char* str )
 // Convert a single Character from UTF8 to Extended ASCII.                                 *
 // Return "0" if a byte has to be ignored.                                                 *
 //******************************************************************************************
-byte utf8ascii ( byte ascii )
+char utf8ascii ( char ascii )
 {
-  static const byte lut_C3[] = 
-         { "AAAAAAACEEEEIIIIDNOOOOO#0UUUU###aaaaaaaceeeeiiiidnooooo##uuuuyyy" } ;
-  static byte       c1 ;              // Last character buffer
-  byte              res = 0 ;         // Result, default 0
+  static const char lut_C3[] = { "AAAAAAACEEEEIIIIDNOOOOO#0UUUU###"
+                                 "aaaaaaaceeeeiiiidnooooo##uuuuyyy" } ;
+  static char       c1 ;              // Last character buffer
+  char              res = '\0' ;      // Result, default 0
 
   if ( ascii <= 0x7F )                // Standard ASCII-set 0..0x7F handling
   {
@@ -1153,15 +1154,15 @@ byte utf8ascii ( byte ascii )
   else
   {
     switch ( c1 )                     // Conversion depending on first UTF8-character
-    {   
+    {
       case 0xC2: res = '~' ;
-                 break ;
-      case 0xC3: res = lut_C3[ascii-128] ;
-                 break ;
+        break ;
+      case 0xC3: res = lut_C3[ascii - 128] ;
+        break ;
       case 0x82: if ( ascii == 0xAC )
-                 {
-                    res = 'E' ;       // Special case Euro-symbol
-                 }
+        {
+          res = 'E' ;                 // Special case Euro-symbol
+        }
     }
     c1 = ascii ;                      // Remember actual character
   }
@@ -1170,11 +1171,11 @@ byte utf8ascii ( byte ascii )
 
 
 //******************************************************************************************
-//                              U T F 8 A S C I I                                          *
+//                              U T F 8 A S C I I _ I P                                    *
 //******************************************************************************************
 // In Place conversion UTF8-string to Extended ASCII (ASCII is shorter!).                  *
 //******************************************************************************************
-void utf8ascii ( char* s )
+void utf8ascii_ip ( char* s )
 {
   int  i, k = 0 ;                     // Indexes for in en out string
   char c ;
@@ -1191,6 +1192,29 @@ void utf8ascii ( char* s )
 }
 
 
+//**************************************************************************************************
+//                                      U T F 8 A S C I I                                          *
+//**************************************************************************************************
+// Conversion UTF8-String to Extended ASCII String.                                                *
+//**************************************************************************************************
+String utf8ascii ( const char* s )
+{
+  int  i ;                            // Index for input string
+  char c ;
+  String res = "" ;                   // Result string
+
+  for ( i = 0 ; s[i] ; i++ )          // For every input character
+  {
+    c = utf8ascii ( s[i] ) ;          // Translate if necessary
+    if ( c )                          // Good translation?
+    {
+      res += String ( c ) ;           // Yes, put in output string
+    }
+  }
+  return res ;
+}
+
+
 //******************************************************************************************
 //                              D I S P L A Y I N F O                                      *
 //******************************************************************************************
@@ -1201,7 +1225,7 @@ void displayinfo ( const char *str, int pos )
   char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
 
   strcpy ( buf, str ) ;                         // Make a local copy of the string
-  utf8ascii ( buf ) ;                           // Convert possible UTF8
+  utf8ascii_ip ( buf ) ;                        // Convert possible UTF8
   dline[pos].str = buf ;                        // Write o buffer
   dsp_update_line ( pos ) ;                     // Show on display
 }
@@ -1319,7 +1343,7 @@ void spiramRead ( uint32_t addr, uint8_t *buff, uint32_t size )
     SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
     digitalWrite ( SRAM_CS, LOW ) ;
     spiTransfer32 ( (0x03<<24)|(addr++&0x00ffffff) ) ;   // Set read mode
-    buff[i++] = SPI.transfer ( 0x00 );
+    buff[i++] = SPI.transfer ( 0x00 ) ;
     digitalWrite ( SRAM_CS, HIGH ) ;
     SPI.endTransaction();
   }
@@ -2553,7 +2577,63 @@ String xmlparse ( String mount )
   return String ( tmpstr ) ;                           // Return final streaming URL.
 }
 
+
 #if defined ( IR )
+//**************************************************************************************************
+//                                          I S R _ I R                                            *
+//**************************************************************************************************
+// Interrupts received from VS1838B on every change of the signal.                                 *
+// Intervals are 640 or 1640 microseconds for data.  syncpulses are 3400 micros or longer.         *
+// Input is complete after 65 level changes.                                                       *
+// Only the last 32 level changes are significant and will be handed over to common data.          *
+//**************************************************************************************************
+void IRAM_ATTR isr_IR()
+{
+  static volatile uint32_t      t0 = 0 ;             // To get the interval
+  static volatile uint32_t      ir_locvalue = 0 ;    // IR code
+  static volatile int           ir_loccount = 0 ;    // Length of code
+
+  uint32_t         t1, intval ;                      // Current time and interval since last change
+  uint32_t         mask_in = 2 ;                     // Mask input for conversion
+  uint16_t         mask_out = 1 ;                    // Mask output for conversion
+
+  ir_intcount++ ;                                    // Test IR input.
+  t1 = micros() ;                                    // Get current time
+  intval = t1 - t0 ;                                 // Compute interval
+  t0 = t1 ;                                          // Save for next compare
+  if ( ( intval > 300 ) && ( intval < 800 ) )        // Short pulse?
+  {
+    ir_locvalue = ir_locvalue << 1 ;                 // Shift in a "zero" bit
+    ir_loccount++ ;                                  // Count number of received bits
+    ir_0 = ( ir_0 * 3 + intval ) / 4 ;               // Compute average durartion of a short pulse
+  }
+  else if ( ( intval > 1400 ) && ( intval < 1900 ) ) // Long pulse?
+  {
+    ir_locvalue = ( ir_locvalue << 1 ) + 1 ;         // Shift in a "one" bit
+    ir_loccount++ ;                                  // Count number of received bits
+    ir_1 = ( ir_1 * 3 + intval ) / 4 ;               // Compute average durartion of a short pulse
+  }
+  else if ( ir_loccount == 65 )                      // Value is correct after 65 level changes
+  {
+    while ( mask_in )                                // Convert 32 bits to 16 bits
+    {
+      if ( ir_locvalue & mask_in )                   // Bit set in pattern?
+      {
+        ir_value |= mask_out ;                       // Set set bit in result
+      }
+      mask_in <<= 2 ;                                // Shift input mask 2 positions
+      mask_out <<= 1 ;                               // Shift output mask 1 position
+    }
+    ir_loccount = 0 ;                                // Ready for next input
+  }
+  else
+  {
+    ir_locvalue = 0 ;                                // Reset decoding
+    ir_loccount = 0 ;
+  }
+}
+
+
 //**************************************************************************************************
 //                                     S C A N I R                                                 *
 //**************************************************************************************************
@@ -2561,103 +2641,113 @@ String xmlparse ( String mount )
 //**************************************************************************************************
 void scanIR()
 {
-  uint8_t        oldvol ;
-
-  if ( irrecv.decode ( &decodedIRCommand ) )
+  if ( ir_value )                                           // Any input?
   {
-    dbgprint ( "IR Command received" ) ;
-    oldvol = vs1053player.getVolume();
-    if ( decodedIRCommand.value == IR_VOLDOWN )
+    if ( ir_value == ir_preset1 )
     {
-      oldvol = vs1053player.getVolume();
-      ini_block.reqvol = oldvol - 2;
-      dbgprint ( "Volume now is %d", ini_block.reqvol ) ;
+      ini_block.newpreset = 1 ;
+      dbgprint ( "IR code %04X - ir_preset1", ir_value ) ;
     }
-    if ( decodedIRCommand.value == IR_VOLUP )
+    else if ( ir_value == ir_preset2 )
     {
-      oldvol = vs1053player.getVolume();
-      ini_block.reqvol = oldvol + 2;
-      dbgprint ( "Volume now is %d", ini_block.reqvol ) ;
+      ini_block.newpreset = 2 ;
+      dbgprint ( "IR code %04X - ir_preset2", ir_value ) ;
     }
-    if ( ini_block.reqvol < 0 ) ini_block.reqvol = 0;
-    if ( ini_block.reqvol > 100 ) ini_block.reqvol = 100;
-
-    if ( decodedIRCommand.value == IR_PREV )
+    else if ( ir_value == ir_preset3 )
     {
-      ini_block.newpreset = currentpreset - 1;
-      dbgprint ( "IR Command: previous station" ) ;
+      ini_block.newpreset = 3 ;
+      dbgprint ( "IR code %04X - ir_preset3", ir_value ) ;
     }
-    if ( decodedIRCommand.value == IR_NEXT )
+    else if ( ir_value == ir_preset4 )
     {
-      ini_block.newpreset = currentpreset + 1;
-      dbgprint ( "IR Command: next radio station" ) ;
+      ini_block.newpreset = 4 ;
+      dbgprint ( "IR code %04X - ir_preset4", ir_value ) ;
     }
-    if ( decodedIRCommand.value == IR_MUTE )
+    else if ( ir_value == ir_preset5 )
     {
-      muteflag = !muteflag;
-      dbgprint ( "IR Command: mute" ) ;
+      ini_block.newpreset = 5 ;
+      dbgprint ( "IR code %04X - ir_preset5", ir_value ) ;
     }
-    if ( decodedIRCommand.value == IR_PLAY )
+    else if ( ir_value == ir_preset6 )
     {
-      analyzeCmd("resume") ;
-      dbgprint ( "IR Command: resume" ) ;
+      ini_block.newpreset = 6 ;
+      dbgprint ( "IR code %04X - ir_preset3", ir_value ) ;
     }
-    if ( decodedIRCommand.value == IR_STOP )
+    else if ( ir_value == ir_preset7 )
+    {
+      ini_block.newpreset = 7 ;
+      dbgprint ( "IR code %04X - ir_preset7", ir_value ) ;
+    }
+    else if ( ir_value == ir_preset8 )
+    {
+      ini_block.newpreset = 8 ;
+      dbgprint ( "IR code %04X - ir_preset8", ir_value ) ;
+    }
+    else if ( ir_value == ir_preset9 )
+    {
+      ini_block.newpreset = 9 ;
+      dbgprint ( "IR code %04X - ir_preset9", ir_value ) ;
+    }
+    else if ( ir_value == ir_preset0 )
+    {
+      ini_block.newpreset = 0 ;
+      dbgprint ( "IR code %04X - ir_preset0", ir_value ) ;
+    }
+    else if ( ir_value == ir_stop )
     {
       analyzeCmd("stop");
-      dbgprint ("IR Command: stop");
+      dbgprint ( "IR code %04X - ir_stop", ir_value ) ;
     }
-    if (decodedIRCommand.value == IR_PRESET00)
+    else if ( ir_value == ir_play )
     {
-      ini_block.newpreset = 0;
-      dbgprint ("IR Command: preset_00");
+      analyzeCmd("resume");
+      dbgprint ( "IR code %04X - ir_play", ir_value ) ;
     }
-    if (decodedIRCommand.value == IR_PRESET01)
+    else if ( ir_value == ir_volup )
     {
-      ini_block.newpreset = 1;
-      dbgprint ("IR Command: preset_01");
+      if ( ini_block.reqvol < 100 )
+      {
+        ini_block.reqvol = vs1053player.getVolume() + 2 ;
+      }
+      else
+      {
+        ini_block.reqvol = 100 ;
+      }
+      dbgprint ( "IR code %04X - ir_volup", ir_value ) ;
     }
-    if (decodedIRCommand.value == IR_PRESET02)
+    else if ( ir_value == ir_voldown )
     {
-      ini_block.newpreset = 2;
-      dbgprint ("IR Command: preset_02");
+      if ( ini_block.reqvol < 0 )
+      {
+        ini_block.reqvol = 0 ;
+      }
+      else
+      {        
+        ini_block.reqvol = vs1053player.getVolume() - 2 ;
+      }
+      dbgprint ( "IR code %04X - ir_voldown", ir_value ) ;
     }
-    if (decodedIRCommand.value == IR_PRESET03)
+    else if ( ir_value == ir_mute )
     {
-      ini_block.newpreset = 3;
-      dbgprint ("IR Command: preset_03");
+      muteflag = !muteflag;
+      dbgprint ( "IR code %04X - ir_mute", ir_value ) ;
     }
-    if (decodedIRCommand.value == IR_PRESET04)
+    else if ( ir_value == ir_next )
     {
-      ini_block.newpreset = 4;
-      dbgprint ("IR Command: preset_04");
+      ini_block.newpreset = currentpreset + 1 ;
+      dbgprint ( "IR code %04X - ir_next", ir_value ) ;
     }
-    if (decodedIRCommand.value == IR_PRESET05)
+    else if ( ir_value == ir_prev )
     {
-      ini_block.newpreset = 5;
-      dbgprint ("IR Command: preset_05");
+      ini_block.newpreset = currentpreset - 1 ;
+      dbgprint ( "IR code %04X - ir_prev", ir_value ) ;
     }
-    if (decodedIRCommand.value == IR_PRESET06)
+    else
     {
-      ini_block.newpreset = 6;
-      dbgprint ("IR Command: preset_06");
+      dbgprint ( "IR code %04X received, but not found in the configuration! Timing %d/%d",
+                 ir_value, ir_0, ir_1 ) ;
     }
-    if (decodedIRCommand.value == IR_PRESET07)
-    {
-      ini_block.newpreset = 7;
-      dbgprint ("IR Command: preset_07");
-    }
-    if (decodedIRCommand.value == IR_PRESET08)
-    {
-      ini_block.newpreset = 8;
-      dbgprint ("IR Command: preset_08");
-    }
-    if (decodedIRCommand.value == IR_PRESET09)
-    {
-      ini_block.newpreset = 9;
-      dbgprint ("IR Command: preset_09");
-    }
-    irrecv.resume();  // Get ready to receive next IR command
+    ir_value = 0 ;                                          // Reset IR code received
   }
 }
 #endif
@@ -2696,18 +2786,18 @@ void setup()
   ini_block.clk_server = "pool.ntp.org" ;              // Default server for NTP
   ini_block.clk_offset = 0 ;                           // Default UTC time zone
   ini_block.clk_dst = 1 ;                              // DST is +1 hour
-  ini_block.reqvol       = 0 ;
+  ini_block.reqvol = 0 ;
   memset ( ini_block.rtone, 0, 4 )  ;
-  ini_block.newpreset    = 0 ;
+  ini_block.newpreset = 0 ;
   ini_block.ssid = "" ;
   ini_block.passwd = "" ;
   LittleFS.begin() ;                                   // Enable file system
-  // Show some info about the LittleFS
   LittleFS.info ( fs_info ) ;
-  dbgprint ( "FS Total %d, used %d", fs_info.totalBytes, fs_info.usedBytes ) ;
+  dbgprint ( "FS Total %d, used %d", 
+             fs_info.totalBytes, fs_info.usedBytes ) ; // Show some info about the LittleFS
   if ( fs_info.totalBytes == 0 )
   {
-    dbgprint ( "No LittleFS found!  See documentation." ) ;
+    dbgprint ( "No LittleFS found! See the documentation." ) ;
   }
   dir = LittleFS.openDir("/") ;                        // Show files in FS
   while ( dir.next() )                                 // All files
@@ -2727,15 +2817,16 @@ void setup()
   WiFi.mode ( WIFI_STA ) ;                             // This ESP is a station
   wifi_station_set_hostname ( (char*)NAME ) ;
   SPI.begin() ;                                        // Init SPI bus
-  // Print some memory and sketch info
   dbgprint ( "Starting ESP Version %s...  Free memory %d",
              VERSION,
-             system_get_free_heap_size() ) ;
+             system_get_free_heap_size() ) ;           // Print some memory info
   dbgprint ( "Sketch size %d, free size %d",
              ESP.getSketchSize(),
-             ESP.getFreeSketchSpace() ) ;
+             ESP.getFreeSketchSpace() ) ;              // And sketch info
 #if defined ( IR )
-  irrecv.enableIRIn();                                 // Enable IR receiver
+    dbgprint ( "Enable pin %d for IR", IR_PIN ) ;
+    pinMode ( IR_PIN, INPUT ) ;                        // Pin for IR receiver VS1838B
+    attachInterrupt ( IR_PIN, isr_IR, CHANGE ) ;       // Interrupts will be handle by isr_IR
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
   if ( vs1053player.getChipVersion() == 4 )            // Check if we are using VS1053B chip
@@ -3794,6 +3885,7 @@ char* analyzeCmd ( const char* par, const char* val )
     sprintf ( reply,
               "New preset station %s accepted",       // Format reply
               host.c_str() ) ;
+    utf8ascii_ip ( reply ) ;                          // Remove possible strange characters
   }
   else if ( argument == "xml" )
   {
@@ -3807,6 +3899,7 @@ char* analyzeCmd ( const char* par, const char* val )
     sprintf ( reply,
               "New xml preset station %s accepted",   // Format reply
               host.c_str() ) ;
+    utf8ascii_ip ( reply ) ;                          // Remove possible strange characters
   }
   else if ( argument == "status" )                    // Status request
   {
