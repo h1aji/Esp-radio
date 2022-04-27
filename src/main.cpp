@@ -46,7 +46,7 @@ extern "C"
 #define SPIRAM
 #if defined ( SPIRAM )
   // Full size of 23LC1024 chip is 131072 bytes
-  #define RINGBFSIZ         40000
+  #define RINGBFSIZ         60000
 #else
   // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
   #define RINGBFSIZ         18000
@@ -201,11 +201,7 @@ bool             localfile = false ;                       // Play from local mp
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
 uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
-#if defined ( SPIRAM )
-  uint32_t*      ringbuf ;                                 // Ringbuffer for VS1053
-#else
-  uint8_t*       ringbuf ; 
-#endif
+uint8_t          *ringbuf ;                                // Ringbuffer for VS1053 
 uint16_t         rbwindex = 0 ;                            // Fill pointer in ringbuffer
 uint16_t         rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
 bool             scrollflag = false ;                      // Request to scroll LCD
@@ -1311,7 +1307,7 @@ inline uint16_t ringavail()
 //******************************************************************************************
 // No check on available space.  See ringspace()                                           *
 //******************************************************************************************
-void putring ( uint8_t b )              // Put one byte in the ringbuffer
+void putring ( uint8_t b )                // Put one byte in the ringbuffer
 {
   *(ringbuf + rbwindex) = b ;             // Put byte in ringbuffer
   if ( ++rbwindex == RINGBFSIZ )          // Increment pointer and
@@ -1334,7 +1330,7 @@ uint8_t getring()
     rbrindex = 0 ;                        // wrap at end
   }
   rcount-- ;                              // Count is now one less
-  return *(ringbuf + rbrindex) ;          // return the oldest byte
+  return *(ringbuf + rbrindex) ;          // Return the oldest byte
 }
 
 
@@ -2573,7 +2569,7 @@ void setup()
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
   #if defined ( SPIRAM )
     ESP.setExternalHeap();                             // Set external memory to use
-    ringbuf = (uint32_t *) malloc ( RINGBFSIZ ) ;      // Create ring buffer
+    ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
     dbgprint ( "External buffer: Address %p, free %d\n", 
                     ringbuf, ESP.getFreeHeap() ) ;
     ESP.resetHeap();
