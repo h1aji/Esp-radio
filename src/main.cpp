@@ -1235,23 +1235,6 @@ void displayinfo ( const char *str, int pos )
 // Retrieve the local time from NTP server and convert to string.                                  *
 // Will be called every second.                                                                    *
 //**************************************************************************************************
-bool getLocalTime ( struct tm * info, uint32_t ms )
-{
-  uint32_t start = millis();
-  time_t now;
-  while ( ( millis()-start ) <= ms )
-  {
-    time ( &now ) ;
-    localtime_r ( &now, info ) ;
-    if ( info->tm_year > ( 2016 - 1900 ) )
-    {
-      return true;
-    }
-    delay ( 10 ) ;
-  }
-  return false;
-}
-
 void gettime()
 {
   #if defined ( LCD )
@@ -1276,7 +1259,7 @@ void gettime()
       {
         dbgprint ( "Sync TOD" ) ;
       }
-      if ( !getLocalTime ( &timeinfo, 5000 ) )              // Read from NTP server
+      if ( !getLocalTime ( &timeinfo ) )              // Read from NTP server
       {
         dbgprint ( "Failed to obtain time!" ) ;             // Error
         timeinfo.tm_year = 0 ;                              // Set current time to illegal
@@ -2052,7 +2035,7 @@ bool connectwifi()
     WiFi.softAP ( NAME, NAME ) ;                       // This ESP will be an AP
     delay ( 5000 ) ;
     pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Address if AP
-    displayinfo ( " AP mode activated ", 2 ) ;
+    displayinfo ( "*AP mode activated*", 2 ) ;
     return false ;
   }
 
@@ -2831,7 +2814,7 @@ void setup()
   dsp_begin();
   displayinfo ( "      Esp-radio     ", 0 ) ;
   delay ( 10 ) ;
-  displayinfo ( "      Starting      ", 2 ) ;
+  displayinfo ( "       Loading      ", 2 ) ;
 #endif
   delay ( 10 ) ;
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
