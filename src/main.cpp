@@ -3,7 +3,6 @@
 //*              by Ed Smallenburg (ed@smallenburg.nl)                                           *
 //************************************************************************************************
 //
-//
 // Define the version number, also used for webserver as Last-Modified header:
 #define VERSION "Wed, 13 Apr 2022 12:10:00 GMT"
 //
@@ -15,18 +14,18 @@
 #include <string.h>
 #include <Ticker.h>
 #include <time.h>
-
+//
 #include <AsyncMqttClient.h>
 #include <ESPAsyncWebServer.h>
 #include <TinyXML.h>
-
-#include "vs1053b-patches.h"
-
+//
+#include "VS1053.h"
+//
 extern "C"
 {
   #include <user_interface.h>
 }
-
+//
 // Definitions for 3 control switches on analog input
 // You can test the analog input values by holding down the switch and select /?analog=1
 // in the web interface. See schematics in the documentation.
@@ -37,27 +36,10 @@ extern "C"
 #define asw2    2000
 #define asw3    2000
 //
-// Digital I/O used
-// Pins for VS1053 module
-#define VS1053_CS     2
-#define VS1053_DCS    16
-#define VS1053_DREQ   10
-//
-// Use SPIRAM as ringbuffer
-#define SPIRAM
-#if defined ( SPIRAM )
-  // CS pin is connected to GPIO 15
-  #define SRAM_CS           15
-  // 23LC1024 supports theorically up to 20MHz
-  #define SRAM_FREQ         20e6
-  // Total size SPI RAM in bytes
-  #define SRAM_SIZE         131072
-  // Chunk size
-  #define CHUNKSIZE         32
-  // Total size SPI RAM in chunks
-  #define SRAM_CH_SIZE      4096
-  // Delay (in bytes) before reading from SPIRAM
-  #define SPIRAMDELAY       100000
+// Use 23LC1024 SPI RAM as ringbuffer
+#define SRAM
+#if defined ( SRAM )
+#include "SPIRAM.h"
 #else
   // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
   #define RINGBFSIZ         18000
@@ -77,38 +59,17 @@ extern "C"
 // Define LCD if you are using LCD 2004
 #define LCD
 #if defined ( LCD )
-  #include <Wire.h>
-  // SDA and SCL pins for LCD 2004
-  #define SDA_PIN     4
-  #define SCL_PIN     5
-  // Adjust for your display
-  #define I2C_ADDRESS 0x27
+#include "LCD2004.h"
+#else
+#define displayinfo(a,b)            // Empty declaration
+#define displaytime(a)
 #endif
 //
 // Enable support for IR by uncommenting the next line
 #define IR
 #if defined ( IR )
-// Set IR pin to GPIO 0
-  #define IR_PIN      0
-  uint16_t       ir_preset1 = 0xA25D ;
-  uint16_t       ir_preset2 = 0x629D ;
-  uint16_t       ir_preset3 = 0xE21D ;
-  uint16_t       ir_preset4 = 0x22DD ;
-  uint16_t       ir_preset5 = 0x02FD ;
-  uint16_t       ir_preset6 = 0xC23D ;
-  uint16_t       ir_preset7 = 0xE01F ;
-  uint16_t       ir_preset8 = 0xA857 ;
-  uint16_t       ir_preset9 = 0x906F ;
-  uint16_t       ir_preset0 = 0x9867 ;
-  uint16_t       ir_stop    = 0xB04F ; // #
-  uint16_t       ir_play    = 0x6897 ; // *
-  uint16_t       ir_volup   = 0x18E7 ;
-  uint16_t       ir_voldown = 0x4AB5 ;
-  uint16_t       ir_mute    = 0x38C7 ;
-  uint16_t       ir_next    = 0x5AA5 ;
-  uint16_t       ir_prev    = 0x10EF ;
+#include "IR.h"
 #endif
-
 
 //
 //******************************************************************************************
@@ -132,9 +93,9 @@ void   XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
                     char* data,  uint16_t dataLen ) ;
 bool   connecttohost() ;
 void   gettime() ;
-char   utf8ascii ( char ascii ) ;                  // Convert UTF8 char to normal char
-void   utf8ascii_ip ( char* s ) ;                  // In place conversion full string
-String utf8ascii ( const char* s ) ;
+char   utf8ascii ( char ascii ) ;                             // Convert UTF to Ascii
+void   utf8ascii_ip ( char* s ) ;                             // Convert UTF to Ascii in place
+String utf8ascii ( const char* s ) ;                          // Convert UTF to Ascii as String
 void   scan_content_length ( const char* metalinebf ) ;
 
 //
@@ -213,15 +174,8 @@ bool             localfile = false ;                       // Play from local mp
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
 uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
-#if defined ( SPIRAM )
-  uint16_t       chcount ;                                 // Number of chunks currently in buffer
-  uint32_t       readinx ;                                 // Read index
-  uint32_t       writeinx ;                                // write index
-  uint8_t        prcwinx ;                                 // Index in pwchunk (see putring)
-  uint8_t        prcrinx ;                                 // Index in prchunk (see getring)
-  int32_t        spiramdelay = SPIRAMDELAY ;               // Delay before reading from SPIRAM
-#else
-  uint8_t*       ringbuf ;                                 // Ringbuffer for VS1053
+#if not defined ( SRAM )
+  uint8_t       *ringbuf ;                                 // Ringbuffer for VS1053
   uint16_t       rbwindex = 0 ;                            // Fill pointer in ringbuffer
   uint16_t       rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
 #endif
@@ -230,12 +184,7 @@ struct tm        timeinfo ;                                // Will be filled by 
 char             timetxt[9] ;                              // Converted timeinfo
 bool             time_req = false ;                        // Set time requested
 uint32_t         clength ;                                 // Content length found in http header
-#if defined ( IR )
-  int              ir_intcount = 0 ;                       // For test IR interrupts
-  uint16_t         ir_value = 0 ;                          // IR code
-  uint32_t         ir_0 = 550 ;                            // Average duration of an IR short pulse
-  uint32_t         ir_1 = 1650 ;                           // Average duration of an IR long pulse
-#endif
+
 
 // XML parse globals.
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -259,890 +208,29 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 //******************************************************************************************
 // Pages and CSS for the webinterface.                                                     *
 //******************************************************************************************
-#include "about_html.h"
-#include "config_html.h"
-#include "index_html.h"
-#include "radio_css.h"
-#include "favicon_ico.h"
-
-
-//
-//******************************************************************************************
-// VS1053 stuff.  Based on maniacbug library.                                              *
-//******************************************************************************************
-// VS1053 class definition.                                                                *
-//******************************************************************************************
-class VS1053
-{
-  private:
-    uint8_t       cs_pin ;                        // Pin where CS line is connected
-    uint8_t       dcs_pin ;                       // Pin where DCS line is connected
-    uint8_t       dreq_pin ;                      // Pin where DREQ line is connected
-    uint8_t       curvol ;                        // Current volume setting 0..100%
-    const uint8_t vs1053_chunk_size = 32 ;
-    // SCI Register
-    const uint8_t SCI_MODE          = 0x0 ;
-    const uint8_t SCI_STATUS        = 0x1 ;
-    const uint8_t SCI_BASS          = 0x2 ;
-    const uint8_t SCI_CLOCKF        = 0x3 ;
-    const uint8_t SCI_AUDATA        = 0x5 ;
-    const uint8_t SCI_WRAM          = 0x6 ;
-    const uint8_t SCI_WRAMADDR      = 0x7 ;
-    const uint8_t SCI_AIADDR        = 0xA ;
-    const uint8_t SCI_VOL           = 0xB ;
-    const uint8_t SCI_AICTRL0       = 0xC ;
-    const uint8_t SCI_AICTRL1       = 0xD ;
-    const uint8_t SCI_num_registers = 0xF ;
-    // SCI_MODE bits
-    const uint8_t SM_SDINEW         = 11 ;        // Bitnumber in SCI_MODE always on
-    const uint8_t SM_RESET          = 2 ;         // Bitnumber in SCI_MODE soft reset
-    const uint8_t SM_CANCEL         = 3 ;         // Bitnumber in SCI_MODE cancel song
-    const uint8_t SM_TESTS          = 5 ;         // Bitnumber in SCI_MODE for tests
-    const uint8_t SM_LINE1          = 14 ;        // Bitnumber in SCI_MODE for Line input
-    SPISettings   VS1053_SPI ;                    // SPI settings for this slave
-    uint8_t       endFillByte ;                   // Byte to send when stopping song
-  protected:
-    inline void await_data_request() const
-    {
-      while ( !digitalRead ( dreq_pin ) )
-      {
-        yield() ;                                 // Very short delay
-      }
-    }
-
-    inline void control_mode_on() const
-    {
-      SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
-      digitalWrite ( dcs_pin, HIGH ) ;            // Bring slave in control mode
-      digitalWrite ( cs_pin, LOW ) ;
-    }
-
-    inline void control_mode_off() const
-    {
-      digitalWrite ( cs_pin, HIGH ) ;             // End control mode
-      SPI.endTransaction() ;                      // Allow other SPI users
-    }
-
-    inline void data_mode_on() const
-    {
-      SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
-      digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
-      digitalWrite ( dcs_pin, LOW ) ;
-    }
-
-    inline void data_mode_off() const
-    {
-      digitalWrite ( dcs_pin, HIGH ) ;            // End data mode
-      SPI.endTransaction() ;                      // Allow other SPI users
-    }
-
-    uint16_t read_register ( uint8_t _reg ) const ;
-    void     write_register ( uint8_t _reg, uint16_t _value ) const ;
-    void     sdi_send_buffer ( uint8_t* data, size_t len ) ;
-    void     sdi_send_fillers ( size_t length ) ;
-    void     wram_write ( uint16_t address, uint16_t data ) ;
-    uint16_t wram_read ( uint16_t address ) ;
-
-  public:
-    // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
-    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) ;
-    void     begin() ;                                   // Begin operation.  Sets pins correctly,
-    // and prepares SPI bus.
-    void     startSong() ;                               // Prepare to start playing. Call this each
-    // time a new song starts.
-    void     playChunk ( uint8_t* data, size_t len ) ;   // Play a chunk of data.  Copies the data to
-    // the chip.  Blocks until complete.
-    void     stopSong() ;                                // Finish playing a song. Call this after
-    // the last playChunk call.
-    void     setVolume ( uint8_t vol ) ;                 // Set the player volume.Level from 0-100,
-    // higher is louder.
-    void     setTone ( uint8_t* rtone ) ;                // Set the player baas/treble, 4 nibbles for
-    // treble gain/freq and bass gain/freq
-    uint8_t  getVolume() ;                               // Get the currenet volume setting.
-    // higher is louder.
-    void     printDetails ( const char *header ) ;       // Print configuration details to serial output.
-    void     softReset() ;                               // Do a soft reset
-    bool     testComm ( const char *header ) ;           // Test communication with module
-    inline bool data_request() const
-    {
-      return ( digitalRead ( dreq_pin ) == HIGH ) ;
-    }
-    void     adjustRate ( long ppm2 ) ;                  // Fine tune the datarate
-    void     switchToMp3Mode();
-    uint16_t getChipVersion();                           // Gets version of the VLSI chip being used
-
-    void loadUserCode ( const unsigned short* plugin, unsigned short plugin_size ) ;
-    void loadDefaultVs1053Patches();                     // Loads the latest generic firmware patch.
-
-} ;
-
-//******************************************************************************************
-// VS1053 class implementation.                                                            *
-//******************************************************************************************
-
-VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) :
-  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin)
-{
-}
-
-uint16_t VS1053::read_register ( uint8_t _reg ) const
-{
-  uint16_t result ;
-
-  control_mode_on() ;
-  SPI.write ( 3 ) ;                                // Read operation
-  SPI.write ( _reg ) ;                             // Register to write (0..0xF)
-  // Note: transfer16 does not seem to work
-  result = ( SPI.transfer ( 0xFF ) << 8 ) |        // Read 16 bits data
-           ( SPI.transfer ( 0xFF ) ) ;
-  await_data_request() ;                           // Wait for DREQ to be HIGH again
-  control_mode_off() ;
-  return result ;
-}
-
-void VS1053::write_register ( uint8_t _reg, uint16_t _value ) const
-{
-  control_mode_on( );
-  SPI.write ( 2 ) ;                                // Write operation
-  SPI.write ( _reg ) ;                             // Register to write (0..0xF)
-  SPI.write16 ( _value ) ;                         // Send 16 bits data
-  await_data_request() ;
-  control_mode_off() ;
-}
-
-void VS1053::sdi_send_buffer ( uint8_t* data, size_t len )
-{
-  size_t chunk_length ;                            // Length of chunk 32 byte or shorter
-
-  data_mode_on() ;
-  while ( len )                                    // More to do?
-  {
-    await_data_request() ;                         // Wait for space available
-    chunk_length = len ;
-    if ( len > vs1053_chunk_size )
-    {
-      chunk_length = vs1053_chunk_size ;
-    }
-    len -= chunk_length ;
-    SPI.writeBytes ( data, chunk_length ) ;
-    data += chunk_length ;
-  }
-  data_mode_off() ;
-}
-
-void VS1053::sdi_send_fillers ( size_t len )
-{
-  size_t chunk_length ;                            // Length of chunk 32 byte or shorter
-
-  data_mode_on() ;
-  while ( len )                                    // More to do?
-  {
-    await_data_request() ;                         // Wait for space available
-    chunk_length = len ;
-    if ( len > vs1053_chunk_size )
-    {
-      chunk_length = vs1053_chunk_size ;
-    }
-    len -= chunk_length ;
-    while ( chunk_length-- )
-    {
-      SPI.write ( endFillByte ) ;
-    }
-  }
-  data_mode_off();
-}
-
-void VS1053::wram_write ( uint16_t address, uint16_t data )
-{
-  write_register ( SCI_WRAMADDR, address ) ;
-  write_register ( SCI_WRAM, data ) ;
-}
-
-uint16_t VS1053::wram_read ( uint16_t address )
-{
-  write_register ( SCI_WRAMADDR, address ) ;            // Start reading from WRAM
-  return read_register ( SCI_WRAM ) ;                   // Read back result
-}
-
-bool VS1053::testComm ( const char *header )
-{
-  // Test the communication with the VS1053 module.  The result wille be returned.
-  // If DREQ is low, there is problably no VS1053 connected.  Pull the line HIGH
-  // in order to prevent an endless loop waiting for this signal.  The rest of the
-  // software will still work, but readbacks from VS1053 will fail.
-  int       i ;                                         // Loop control
-  uint16_t  r1, r2, cnt = 0 ;
-  uint16_t  delta = 300 ;                               // 3 for fast SPI
-
-  if ( !digitalRead ( dreq_pin ) )
-  {
-    dbgprint ( "VS1053 not properly installed!" ) ;
-    // Allow testing without the VS1053 module
-    pinMode ( dreq_pin,  INPUT_PULLUP ) ;               // DREQ is now input with pull-up
-    return false ;                                      // Return bad result
-  }
-  // Further TESTING.  Check if SCI bus can write and read without errors.
-  // We will use the volume setting for this.
-  // Will give warnings on serial output if DEBUG is active.
-  // A maximum of 20 errors will be reported.
-  if ( strstr ( header, "Fast" ) )
-  {
-    delta = 3 ;                                         // Fast SPI, more loops
-  }
-  dbgprint ( header ) ;                                 // Show a header
-  for ( i = 0 ; ( i < 0xFFFF ) && ( cnt < 20 ) ; i += delta )
-  {
-    write_register ( SCI_VOL, i ) ;                     // Write data to SCI_VOL
-    r1 = read_register ( SCI_VOL ) ;                    // Read back for the first time
-    r2 = read_register ( SCI_VOL ) ;                    // Read back a second time
-    if  ( r1 != r2 || i != r1 || i != r2 )              // Check for 2 equal reads
-    {
-      dbgprint ( "VS1053 error retry SB:%04X R1:%04X R2:%04X", i, r1, r2 ) ;
-      cnt++ ;
-      delay ( 10 ) ;
-    }
-    yield() ;                                           // Allow ESP firmware to do some bookkeeping
-  }
-  return ( cnt == 0 ) ;                                 // Return the result
-}
-
-void VS1053::begin()
-{
-  pinMode      ( dreq_pin,  INPUT ) ;                   // DREQ is an input
-  pinMode      ( cs_pin,    OUTPUT ) ;                  // The SCI and SDI signals
-  pinMode      ( dcs_pin,   OUTPUT ) ;
-  digitalWrite ( dcs_pin,   HIGH ) ;                    // Start HIGH for SCI en SDI
-  digitalWrite ( cs_pin,    HIGH ) ;
-  delay ( 100 ) ;
-  dbgprint ( "Reset VS1053..." ) ;
-  digitalWrite ( dcs_pin,   LOW ) ;                     // Low & Low will bring reset pin low
-  digitalWrite ( cs_pin,    LOW ) ;
-  delay ( 2000 ) ;
-  dbgprint ( "End reset VS1053..." ) ;
-  digitalWrite ( dcs_pin,   HIGH ) ;                    // Back to normal again
-  digitalWrite ( cs_pin,    HIGH ) ;
-  delay ( 500 ) ;
-  // Init SPI in slow mode ( 0.2 MHz )
-  VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
-  //printDetails ( "Right after reset/startup" ) ;
-  delay ( 20 ) ;
-  //printDetails ( "20 msec after reset" ) ;
-  testComm ( "Slow SPI,Testing VS1053 read/write registers..." ) ;
-  // Most VS1053 modules will start up in midi mode.  The result is that there is no audio
-  // when playing MP3.  You can modify the board, but there is a more elegant way:
-  wram_write ( 0xC017, 3 ) ;                            // GPIO DDR = 3
-  wram_write ( 0xC019, 0 ) ;                            // GPIO ODATA = 0
-  delay ( 100 ) ;
-  //printDetails ( "After test loop" ) ;
-  softReset() ;                                         // Do a soft reset
-  // Switch on the analog parts
-  write_register ( SCI_AUDATA, 44100 + 1 ) ;            // 44.1kHz + stereo
-  // The next clocksetting allows SPI clocking at 5 MHz, 4 MHz is safe then.
-  write_register ( SCI_CLOCKF, 6 << 12 ) ;              // Normal clock settings multiplyer 3.0 = 12.2 MHz
-  //SPI Clock to 4 MHz. Now you can set high speed SPI clock.
-  VS1053_SPI = SPISettings ( 4000000, MSBFIRST, SPI_MODE0 ) ;
-  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_LINE1 ) ) ;
-  testComm ( "Fast SPI, Testing VS1053 read/write registers again..." ) ;
-  delay ( 10 ) ;
-  await_data_request() ;
-  endFillByte = wram_read ( 0x1E06 ) & 0xFF ;
-  dbgprint ( "endFillByte is %X", endFillByte ) ;
-  //printDetails ( "After last clocksetting" ) ;
-  delay ( 100 ) ;
-}
-
-void VS1053::setVolume ( uint8_t vol )
-{
-  // Set volume.  Both left and right.
-  // Input value is 0..100.  100 is the loudest.
-  // Clicking reduced by using 0xf8 to 0x00 as limits.
-  uint16_t value ;                                      // Value to send to SCI_VOL
-
-  if ( vol != curvol )
-  {
-    curvol = vol ;                                      // Save for later use
-    value = map ( vol, 0, 100, 0xFE, 0x00 ) ;           // 0..100% to one channel
-    value = ( value << 8 ) | value ;
-    write_register ( SCI_VOL, value ) ;                 // Volume left and right
-  }
-}
-
-void VS1053::setTone ( uint8_t *rtone )                 // Set bass/treble (4 nibbles)
-{
-  // Set tone characteristics.  See documentation for the 4 nibbles.
-  uint16_t value = 0 ;                                  // Value to send to SCI_BASS
-  int      i ;                                          // Loop control
-
-  for ( i = 0 ; i < 4 ; i++ )
-  {
-    value = ( value << 4 ) | rtone[i] ;                 // Shift next nibble in
-  }
-  write_register ( SCI_BASS, value ) ;                  // Tone settings
-  value = read_register ( SCI_BASS ) ;                  // Read back
-  dbgprint ( "BASS settings is %04X", value ) ;         // Print for TEST
-}
-
-uint8_t VS1053::getVolume()                             // Get the currenet volume setting.
-{
-  return curvol ;
-}
-
-void VS1053::startSong()
-{
-  sdi_send_fillers ( 10 ) ;
-}
-
-void VS1053::playChunk ( uint8_t* data, size_t len )
-{
-  sdi_send_buffer ( data, len ) ;
-}
-
-void VS1053::stopSong()
-{
-  uint16_t modereg ;                     // Read from mode register
-  int      i ;                           // Loop control
-
-  sdi_send_fillers ( 2052 ) ;
-  delay ( 10 ) ;
-  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
-  for ( i = 0 ; i < 200 ; i++ )
-  {
-    sdi_send_fillers ( 32 ) ;
-    modereg = read_register ( SCI_MODE ) ;  // Read status
-    if ( ( modereg & _BV ( SM_CANCEL ) ) == 0 )
-    {
-      sdi_send_fillers ( 2052 ) ;
-      dbgprint ( "Song stopped correctly after %d msec", i * 10 ) ;
-      return ;
-    }
-    delay ( 10 ) ;
-  }
-  printDetails ( "Song stopped incorrectly!" ) ;
-}
-
-void VS1053::softReset()
-{
-  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_RESET ) ) ;
-  delay ( 10 ) ;
-  await_data_request() ;
-}
-
-void VS1053::printDetails ( const char *header )
-{
-  uint16_t     regbuf[16] ;
-  uint8_t      i ;
-
-  dbgprint ( header ) ;
-  dbgprint ( "REG   Contents" ) ;
-  dbgprint ( "---   -----" ) ;
-  for ( i = 0 ; i <= SCI_num_registers ; i++ )
-  {
-    regbuf[i] = read_register ( i ) ;
-  }
-  for ( i = 0 ; i <= SCI_num_registers ; i++ )
-  {
-    delay ( 5 ) ;
-    dbgprint ( "%3X - %5X", i, regbuf[i] ) ;
-  }
-}
-
-void VS1053::adjustRate ( long ppm2 )
-{
-  write_register ( SCI_WRAMADDR, 0x1e07 ) ;
-  write_register ( SCI_WRAM,     ppm2 ) ;
-  write_register ( SCI_WRAM,     ppm2 >> 16 ) ;
-  // oldClock4KHz = 0 forces  adjustment calculation when rate checked.
-  write_register ( SCI_WRAMADDR, 0x5b1c ) ;
-  write_register ( SCI_WRAM,     0 ) ;
-  // Write to AUDATA or CLOCKF checks rate and recalculates adjustment.
-  write_register ( SCI_AUDATA,   read_register ( SCI_AUDATA ) ) ;
-}
-
-void VS1053::switchToMp3Mode()
-{
-    wram_write ( 0xC017, 3 ) ; // GPIO DDR = 3
-    wram_write ( 0xC019, 0 ) ; // GPIO ODATA = 0
-    delay ( 100 ) ;
-    softReset();
-}
-
-uint16_t VS1053::getChipVersion()
-{
-    uint16_t status = read_register ( SCI_STATUS ) ;
-    return ( (status & 0x00F0) >> 4);
-}
-
-void VS1053::loadUserCode ( const unsigned short* plugin, unsigned short plugin_size )
-{
-    int i = 0;
-    while (i<plugin_size)
-    {
-        unsigned short addr, n, val;
-        addr = plugin[i++];
-        n = plugin[i++];
-        if (n & 0x8000U)
-        {
-            n &= 0x7FFF;
-            val = plugin[i++];
-            while (n--)
-            {
-                write_register ( addr, val ) ;
-            }
-        }
-        else
-        {
-            while (n--)
-            {
-                val = plugin[i++];
-                write_register ( addr, val ) ;
-            }
-        }
-    }
-}
-
-/**
- * Load the latest generic firmware patch
- */
-void VS1053::loadDefaultVs1053Patches()
-{
-   loadUserCode ( PATCHES, PATCHES_SIZE ) ;
-};
-
-// The object for the MP3 player
-VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
-
-
-#if defined ( LCD )
-//***************************************************************************************************
-//*  LCD2004.h -- Driver for LCD 2004 display with I2C backpack.                                    *
-//***************************************************************************************************
-// The backpack communicates with the I2C bus and converts the serial data to parallel for the      *
-// 2004 board.  In the serial data, the 8 bits are assigned as follows:                             *
-// Bit   Destination  Description                                                                   *
-// ---   -----------  ------------------------------------                                          *
-//  0    RS           H=data, L=command                                                             *
-//  1    RW           H=read, L=write.  Only write is used.                                         *
-//  2    E            Enable                                                                        *
-//  3    BL           Backlight, H=on, L=off.  Always on.                                           *
-//  4    D4           Data bit 4                                                                    *
-//  5    D5           Data bit 5                                                                    *
-//  6    D6           Data bit 6                                                                    *
-//  7    D7           Data bit 7                                                                    *
-//***************************************************************************************************
-//
-// Note that the display function are limited due to the minimal available space.
-
-
-#define ACKENA true                                         // Enable ACK for I2C communication
-
-#define DELAY_ENABLE_PULSE_SETTLE           50              // Command requires > 37us to settle
-#define FLAG_BACKLIGHT_ON                   0b00001000      // Bit 3, backlight enabled (disabled if clear)
-#define FLAG_ENABLE                         0b00000100      // Bit 2, Enable
-#define FLAG_RS_DATA                        0b00000001      // Bit 0, RS=data (command if clear)
-#define FLAG_RS_COMMAND                     0b00000000      // Command
-
-#define COMMAND_CLEAR_DISPLAY               0x01
-#define COMMAND_RETURN_HOME                 0x02
-#define COMMAND_ENTRY_MODE_SET              0x04
-#define COMMAND_DISPLAY_CONTROL             0x08
-#define COMMAND_FUNCTION_SET                0x20
-#define COMMAND_SET_DDRAM_ADDR              0x80
-
-#define FLAG_DISPLAY_CONTROL_DISPLAY_ON     0x04
-#define FLAG_DISPLAY_CONTROL_CURSOR_ON      0x02
-
-#define FLAG_FUNCTION_SET_MODE_4BIT         0x00
-#define FLAG_FUNCTION_SET_LINES_2           0x08
-#define FLAG_FUNCTION_SET_DOTS_5X8          0x00
-
-#define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
-#define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
-
-#define dsp_print(a)                                        // Print a string 
-#define dsp_setCursor(a,b)                                  // Position the cursor
-#define dsp_getwidth()                      20              // Get width of screen
-#define dsp_getheight()                     4               // Get height of screen
-
-
-class LCD2004
-{
-  public:
-                     LCD2004 ( uint8_t sda, uint8_t scl ) ; // Constructor
-    void             print ( char c ) ;                     // Send 1 char
-    void             reset() ;                              // Perform reset
-    void             sclear() ;                             // Clear the screen
-    void             shome() ;                              // Go to home position
-    void             scursor ( uint8_t col, uint8_t row ) ; // Position the cursor
-    void             scroll ( bool son ) ;                  // Set scroll on/off
-  private:
-    void             scommand ( uint8_t cmd ) ;
-    void             strobe ( uint8_t cmd ) ;
-    void             swrite ( uint8_t val, uint8_t rs ) ;
-    void             write_cmd ( uint8_t val ) ;
-    void             write_data ( uint8_t val ) ;
-    uint8_t          bl  = FLAG_BACKLIGHT_ON ;              // Backlight in every command
-    uint8_t          xchar = 0 ;                            // Current cursor position (text)
-    uint8_t          ychar = 0 ;                            // Current cursor position (text)
-} ;
-
-LCD2004* lcd = NULL ;
-
-bool dsp_begin()
-{
-  dbgprint ( "Init I2C LCD2004: SDA on GPIO %d, SCL on GPIO %d", SDA_PIN, SCL_PIN ) ;
-  if ( ( SDA_PIN == 4 ) && ( SCL_PIN == 5 ) )               // Make sure correct pins are used
-  {
-    lcd = new LCD2004 ( SDA_PIN, SCL_PIN ) ;                // Create an instance for LCD
-  }
-  else
-  {
-    dbgprint ( "Init I2C LCD2004 failed!" ) ;
-  }
-  return ( lcd != NULL ) ;
-}
-
-
-//***********************************************************************************************
-//                                L C D 2 0 0 4  write functions                                *
-//***********************************************************************************************
-// Write functins for command, data and general.                                                *
-//***********************************************************************************************
-void LCD2004::swrite ( uint8_t val, uint8_t rs )            // General write, 8 bits data
-{
-  strobe ( ( val & 0xf0 ) | rs ) ;                          // Send 4 LSB bits
-  strobe ( ( val << 4 ) | rs ) ;                            // Send 4 MSB bits
-}
-
-
-void LCD2004::write_data ( uint8_t val )
-{
-  swrite ( val, FLAG_RS_DATA ) ;                            // Send data (RS = HIGH)
-}
-
-
-void LCD2004::write_cmd ( uint8_t val )
-{
-  swrite ( val, FLAG_RS_COMMAND ) ;                         // Send command (RS = LOW)
-}
-
-
-//***********************************************************************************************
-//                                L C D 2 0 0 4 :: S T R O B E                                  *
-//***********************************************************************************************
-// Send data followed by strobe to clock data to LCD.                                           *
-//***********************************************************************************************
-void LCD2004::strobe ( uint8_t cmd )
-{
-  scommand ( cmd | FLAG_ENABLE ) ;                          // Send command with E high
-  scommand ( cmd ) ;                                        // Same command with E low
-  delayMicroseconds ( DELAY_ENABLE_PULSE_SETTLE ) ;         // Wait a short time
-}
-
-
-//***********************************************************************************************
-//                                L C D 2 0 0 4 :: S C O M M A N D                              *
-//***********************************************************************************************
-// Send a command to the LCD.                                                                   *
-// Actual I/O.  Open a channel to the I2C interface and write one byte.                         *
-//***********************************************************************************************
-void LCD2004::scommand ( uint8_t cmd )
-{
-  Wire.beginTransmission ( I2C_ADDRESS ) ;
-  Wire.write ( cmd | FLAG_BACKLIGHT_ON ) ;
-  Wire.endTransmission() ;
-}
-
-//***********************************************************************************************
-//                                L C D 2 0 0 4 :: P R I N T                                    *
-//***********************************************************************************************
-// Put a character in the buffer.                                                               *
-//***********************************************************************************************
-void LCD2004::print ( char c )
-{
-  write_data ( c ) ;
-}
-
-
-//***********************************************************************************************
-//                                L C D 2 0 0 4 :: S C U R S O R                                *
-//***********************************************************************************************
-// Place the cursor at the requested position.                                                  *
-//***********************************************************************************************
-void LCD2004::scursor ( uint8_t col, uint8_t row )
-{
-  const int row_offsets[] = { 0x00, 0x40, 0x14, 0x54 } ;
-  
-  write_cmd ( COMMAND_SET_DDRAM_ADDR |
-              ( col + row_offsets[row] ) ) ; 
-}
-
-
-//***********************************************************************************************
-//                                L C D 2 0 0 4 :: S C L E A R                                  *
-//***********************************************************************************************
-// Clear the LCD.                                                                               *
-//***********************************************************************************************
-void LCD2004::sclear()
-{
-  write_cmd ( COMMAND_CLEAR_DISPLAY ) ;
-}
-
-
-//***********************************************************************************************
-//                                L C D 2 0 0 4 :: S C R O L L                                  *
-//***********************************************************************************************
-// Set scrolling on/off.                                                                        *
-//***********************************************************************************************
-void LCD2004::scroll ( bool son )
-{
-  uint8_t ecmd = COMMAND_ENTRY_MODE_SET |                   // Assume no scroll
-                 FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT ;
-
-  if ( son )                                                // Scroll on?
-  {
-    ecmd |= FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON ;            // Yes, change function
-  }
-  write_cmd ( ecmd ) ;                                      // Perform command
-}
-
-
-//***********************************************************************************************
-//                                L C D 2 0 0 4 :: S H O M E                                    *
-//***********************************************************************************************
-// Go to home position.                                                                         *
-//***********************************************************************************************
-void LCD2004::shome()
-{
-  write_cmd ( COMMAND_RETURN_HOME ) ;
-}
-
-
-//***********************************************************************************************
-//                                L C D 2 0 0 4 :: R E S E T                                    *
-//***********************************************************************************************
-// Reset the LCD.                                                                               *
-//***********************************************************************************************
-void LCD2004::reset()
-{
-  scommand ( 0 ) ;                                          // Put expander to known state
-  delayMicroseconds ( 1000 ) ;
-  for ( int i = 0 ; i < 3 ; i++ )                           // Repeat 3 times
-  {
-    strobe ( 0x03 << 4 ) ;                                  // Select 4-bit mode
-    delayMicroseconds ( 4500 ) ;
-  }
-  strobe ( 0x02 << 4 ) ;                                    // 4-bit
-  delayMicroseconds ( 4500 ) ;
-  write_cmd ( COMMAND_FUNCTION_SET |
-              FLAG_FUNCTION_SET_MODE_4BIT |
-              FLAG_FUNCTION_SET_LINES_2 |
-              FLAG_FUNCTION_SET_DOTS_5X8 ) ;
-  write_cmd ( COMMAND_DISPLAY_CONTROL |
-              FLAG_DISPLAY_CONTROL_DISPLAY_ON ) ;
-  sclear() ;
-  write_cmd ( COMMAND_ENTRY_MODE_SET |
-              FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT ) ;
-  shome() ;
-}
-
-
-//***********************************************************************************************
-//                                L C D 2 0 0 4                                                 *
-//***********************************************************************************************
-// Constructor for the display.                                                                 *
-//***********************************************************************************************
-LCD2004::LCD2004 ( uint8_t sda, uint8_t scl )
-{
-  Wire.begin ( sda, scl ) ;
-  delay ( 50 ) ;
-  Wire.beginTransmission ( I2C_ADDRESS ) ;
-  if ( Wire.endTransmission() != 0 )
-  {
-    dbgprint ( "LCD2004 connection error!" ) ;          // Safety check, make sure the PCF8574 is connected
-  }
-  reset() ;
-}
-
-struct dsp_str
-{
-  String          str ;
-  uint16_t        len ;                                 // Length of string to show
-  uint16_t        pos ;                                 // Start on this position of string
-  uint8_t         row ;                                 // Row on display  
-} ;
-
-dsp_str dline[4] = { { "", 0, 0, 0 },
-                     { "", 0, 0, 0 },
-                     { "", 0, 0, 0 },
-                     { "", 0, 0, 0 }
-                   } ;
-
-//***********************************************************************************************
-//                                D S P _U P D A T E _ L I N E                                  *
-//***********************************************************************************************
-// Show a selected line                                                                         *
-//***********************************************************************************************
-void dsp_update_line ( uint8_t lnr )
-{
-  uint8_t         i ;                                   // Index in string
-  const char*     p ;
-
-  p = dline[lnr].str.c_str() ;
-  dline[lnr].len = strlen ( p ) ;
-  //dbgprint ( "Strlen is %d, str is %s", len, p ) ;
-  if ( dline[lnr].len > dsp_getwidth() )
-  {
-    if ( dline[lnr].pos >= dline[lnr].len )
-    {
-      dline[lnr].pos = 0 ;
-    }
-    else
-    {
-      p += dline[lnr].pos ;
-    }
-    dline[lnr].len -= dline[lnr].pos ;
-    if ( dline[lnr].len > dsp_getwidth() )
-    {
-      dline[lnr].len = dsp_getwidth() ;
-    }
-  }
-  else
-  {
-    dline[lnr].pos = 0 ;                             // String fits on screen
-  }
-  dline[lnr].pos++ ;
-  lcd->scursor ( 0, lnr ) ;
-  for ( i = 0 ; i < dline[lnr].len ; i++ )
-  {
-    if ( ( *p >= ' ' ) && ( *p <= '~' ) )            // Printable?
-    {
-      lcd->print ( *p ) ;                            // Yes
-    }
-    else
-    {
-      lcd->print ( ' ' ) ;                           // Yes, print space
-    }
-    p++ ;
-  }
-  for ( i = 0 ; i < ( dsp_getwidth() - dline[lnr].len ) ; i++ )  // Fill remainder
-  {
-    lcd->print ( ' ' ) ;
-  }
-  if ( *p == '\0' )                                  // At end of line?
-  {
-    dline[lnr].pos = 0 ;                             // Yes, start allover
-  }
-}
-
-
-//***********************************************************************************************
-//                                D S P _U P D A T E                                            *
-//***********************************************************************************************
-// Show a selection of the 4 sections                                                           *
-//***********************************************************************************************
-void dsp_update()
-{
-  static uint16_t cnt = 0 ;                             // Reduce updates
-
-  if ( cnt++ != 8 )                                     // Action every 8 calls
-  {
-    return ;
-  }
-  cnt = 0 ;
-  dline[2].str.trim() ;                                 // Remove non printing
-  dline[1].str.trim() ;                                 // Remove non printing
-  if ( dline[2].str.length() > dsp_getwidth() )
-  {
-    dline[2].str += String ( "  " ) ;
-  }
-  if ( dline[1].str.length() > dsp_getwidth() )
-  {
-    dline[1].str += String ( "  " ) ;
-  }
-  dsp_update_line ( 1 ) ;
-  dsp_update_line ( 2 ) ;
-}
+#include "web/about_html.h"
+#include "web/config_html.h"
+#include "web/index_html.h"
+#include "web/radio_css.h"
+#include "web/favicon_ico.h"
 
 
 //**************************************************************************************************
-//                                      D I S P L A Y V O L U M E                                  *
+//                                      U T F 8 A S C I I                                          *
 //**************************************************************************************************
-// Display volume for this type of display.                                                        *
-// line 3 will be used.                                                                            *
+// UTF8-Decoder: convert UTF8-string to extended ASCII.                                            *
+// Convert a single Character from UTF8 to Extended ASCII.                                         *
+// Return "0" if a byte has to be ignored.                                                         *
 //**************************************************************************************************
-void displayvolume()
-{
-  static uint8_t   oldvol = 0 ;                       // Previous volume
-  uint8_t          newvol ;                           // Current setting
-  uint16_t         pos ;                              // Positon of volume indicator
-
-  dline[3].str = "";
-
-  newvol = vs1053player.getVolume() ;                 // Get current volume setting
-  if ( newvol != oldvol )                             // Volume changed?
-  {
-    oldvol = newvol ;                                 // Remember for next compare
-    pos = map ( newvol, 0, 100, 0, dsp_getwidth() ) ; // Compute end position on TFT
-    for ( int i = 0 ; i < dsp_getwidth() ; i++ )      // Set oldstr to dots
-    {
-      if ( i <= pos )
-      {
-        dline[3].str += "#" ;                         // Add hash character
-      }
-      else
-      {
-        dline[3].str += " " ;                         // Or blank sign
-      }
-    }
-    dsp_update_line ( 3 ) ;
-  }
-}
-
-
-//**************************************************************************************************
-//                                      D I S P L A Y T I M E                                      *
-//**************************************************************************************************
-// Display date and time to LCD line 0.                                                            *
-//**************************************************************************************************
-void displaytime ( const char* str )
-{
-  const char* WDAYS [] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" } ;
-  char        datetxt[24] ;
-  static char oldstr = '\0' ;                            // To check time difference
-
-  if ( ( str == NULL ) || ( str[0] == '\0' ) )           // Check time string
-  {
-    return ;                                             // Not okay, return
-  }
-  else
-  {
-    if ( str[7] == oldstr )                              // Difference?
-    {
-      return ;                                           // No, quick return
-    }
-    sprintf ( datetxt, "%s %02d.%02d.  %s",              // Format new time to a string
-                       WDAYS[timeinfo.tm_wday],
-                       timeinfo.tm_mday,
-                       timeinfo.tm_mon + 1,
-                       str ) ;
-  }
-  dline[0].str = String ( datetxt ) ;                    // Copy datestring or empty string to LCD line 0   
-  oldstr = str[7] ;                                      // For next compare, last digit of time
-  dsp_update_line ( 0 ) ;
-}
-
-
-//******************************************************************************************
-//                              U T F 8 A S C I I                                          *
-//******************************************************************************************
-// UTF8-Decoder: convert UTF8-string to extended ASCII.                                    *
-// Convert a single Character from UTF8 to Extended ASCII.                                 *
-// Return "0" if a byte has to be ignored.                                                 *
-//******************************************************************************************
 char utf8ascii ( char ascii )
 {
   static const char lut_C3[] = { "AAAAAAACEEEEIIIIDNOOOOO#0UUUU###"
-                                 "aaaaaaaceeeeiiiidnooooo##uuuuyyy" } ;
+                                 "aaaaaaaceeeeiiiidnooooo##uuuuyyy" } ; 
+  static const char lut_C4[] = { "AaAaAaCcCcCcCcDdDdEeEeEeEeEeGgGg"
+                                 "GgGgHhHhIiIiIiIiIiJjJjKkkLlLlLlL" } ;
+  static const char lut_C5[] = { "lLlNnNnNnnnnOoOoOoOoRrRrRrSsSsSs"
+                                 "SsTtTtTtUuUuUuUuUuUuWwYyYZzZzZzs" } ;
+
   static char       c1 ;              // Last character buffer
   char              res = '\0' ;      // Result, default 0
 
@@ -1159,6 +247,10 @@ char utf8ascii ( char ascii )
         break ;
       case 0xC3: res = lut_C3[ascii - 128] ;
         break ;
+      case 0xC4: res = lut_C4[ascii - 128] ;
+        break ;
+      case 0xC5: res = lut_C5[ascii - 128] ;
+        break ;
       case 0x82: if ( ascii == 0xAC )
         {
           res = 'E' ;                 // Special case Euro-symbol
@@ -1170,11 +262,11 @@ char utf8ascii ( char ascii )
 }
 
 
-//******************************************************************************************
-//                              U T F 8 A S C I I _ I P                                    *
-//******************************************************************************************
-// In Place conversion UTF8-string to Extended ASCII (ASCII is shorter!).                  *
-//******************************************************************************************
+//**************************************************************************************************
+//                                U T F 8 A S C I I _ I P                                          *
+//**************************************************************************************************
+// In Place conversion UTF8-string to Extended ASCII (ASCII is shorter!).                          *
+//**************************************************************************************************
 void utf8ascii_ip ( char* s )
 {
   int  i, k = 0 ;                     // Indexes for in en out string
@@ -1215,52 +307,14 @@ String utf8ascii ( const char* s )
 }
 
 
-//******************************************************************************************
-//                              D I S P L A Y I N F O                                      *
-//******************************************************************************************
-// Show a string on the LCD at a specified y-position in a specified color                 *
-//******************************************************************************************
-void displayinfo ( const char *str, int pos )
-{
-  char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
-
-  strcpy ( buf, str ) ;                         // Make a local copy of the string
-  utf8ascii_ip ( buf ) ;                        // Convert possible UTF8
-  dline[pos].str = buf ;                        // Write o buffer
-  dsp_update_line ( pos ) ;                     // Show on display
-}
-#else
-  #define displayinfo(a,b)                      // Empty declaration
-  #define displaytime(a)
-#endif
-
-
 //**************************************************************************************************
 //                                         G E T T I M E                                           *
 //**************************************************************************************************
 // Retrieve the local time from NTP server and convert to string.                                  *
 // Will be called every second.                                                                    *
 //**************************************************************************************************
-bool getLocalTime ( struct tm * info, uint32_t ms )
-{
-  uint32_t start = millis();
-  time_t now;
-  while ( ( millis()-start ) <= ms )
-  {
-    time ( &now ) ;
-    localtime_r ( &now, info ) ;
-    if ( info->tm_year > ( 2016 - 1900 ) )
-    {
-      return true;
-    }
-    delay ( 10 ) ;
-  }
-  return false;
-}
-
 void gettime()
 {
-  #if defined ( LCD )
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
   {
@@ -1282,7 +336,7 @@ void gettime()
       {
         dbgprint ( "Sync TOD" ) ;
       }
-      if ( !getLocalTime ( &timeinfo, 5000 ) )              // Read from NTP server
+      if ( !getLocalTime ( &timeinfo ) )              // Read from NTP server
       {
         dbgprint ( "Failed to obtain time!" ) ;             // Error
         timeinfo.tm_year = 0 ;                              // Set current time to illegal
@@ -1302,151 +356,7 @@ void gettime()
       }
     }
   }
-  #endif
 }
-
-
-#if defined ( SPIRAM )
-//******************************************************************************************
-// SPI RAM routines.                                                                       *
-//******************************************************************************************
-// Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
-//******************************************************************************************
-uint32_t spiTransfer32 ( uint32_t data )
-{
-  union { uint32_t val; struct { uint16_t lsb; uint16_t msb; }; } in, out;
-  in.val = data;
-  out.msb = SPI.transfer16 ( in.msb ) ;
-  out.lsb = SPI.transfer16 ( in.lsb ) ;
-  return out.val;
-}
-
-void spiramWrite ( uint32_t addr, uint8_t *buff, uint32_t size )
-{
-  int i = 0;
-  while ( size-- )
-  {
-    SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
-    digitalWrite ( SRAM_CS, LOW ) ;
-    spiTransfer32 ( (0x02<<24)|(addr++&0x00ffffff) ) ;   // Set write mode
-    SPI.transfer ( buff[i++] ) ;
-    digitalWrite ( SRAM_CS, HIGH ) ;
-    SPI.endTransaction();
-  }
-}
-
-void spiramRead ( uint32_t addr, uint8_t *buff, uint32_t size )
-{
-  int i = 0;
-  while ( size-- )
-  {
-    SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
-    digitalWrite ( SRAM_CS, LOW ) ;
-    spiTransfer32 ( (0x03<<24)|(addr++&0x00ffffff) ) ;   // Set read mode
-    buff[i++] = SPI.transfer ( 0x00 ) ;
-    digitalWrite ( SRAM_CS, HIGH ) ;
-    SPI.endTransaction();
-  }
-}
-
-
-//******************************************************************************************
-//                              S P A C E A V A I L A B L E                                *
-//******************************************************************************************
-// Returns true if bufferspace is available.                                               *
-//******************************************************************************************
-bool spaceAvailable()
-{
-  return ( chcount < SRAM_CH_SIZE ) ;
-}
-
-
-//******************************************************************************************
-//                              D A T A A V A I L A B L E                                  *
-//******************************************************************************************
-// Returns the number of full chunks available in the buffer.                              *
-//******************************************************************************************
-uint16_t dataAvailable()
-{
-  return chcount ;
-}
-
-
-//******************************************************************************************
-//                    G E T F R E E B U F F E R S P A C E                                  *
-//******************************************************************************************
-// Return the free buffer space in chunks.                                                 *
-//******************************************************************************************
-uint16_t getFreeBufferSpace()
-{
-  return ( SRAM_CH_SIZE - chcount ) ;                   // Return number of chunks available
-}
-
-
-//******************************************************************************************
-//                             B U F F E R W R I T E                                       *
-//******************************************************************************************
-// Write one chunk (32 bytes) to SPI RAM.                                                  *
-// No check on available space.  See spaceAvailable().                                     *
-//******************************************************************************************
-void bufferWrite ( uint8_t *b )
-{
-  spiramWrite ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // Put byte in SRAM
-  writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
-  chcount++ ;                                           // Count number of chunks
-}
-
-
-//******************************************************************************************
-//                             B U F F E R R E A D                                         *
-//******************************************************************************************
-// Read one chunk in the user buffer.                                                      *
-// Assume there is always something in the bufferpace.  See dataAvailable()                *
-//******************************************************************************************
-void bufferRead ( uint8_t *b )
-{
-  spiramRead ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;   // return next chunk
-  readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
-  chcount-- ;                                          // Count is now one less
-}
-
-
-//******************************************************************************************
-//                            B U F F E R R E S E T                                        *
-//******************************************************************************************
-void bufferReset()
-{
-  readinx = 0 ;                                        // Reset ringbuffer administration
-  writeinx = 0 ;
-  chcount = 0 ;
-}
-
-
-//******************************************************************************************
-//                                S P I R A M S E T U P                                    *
-//******************************************************************************************
-void spiramSetup()
-{
-  SPI.begin();
-  pinMode ( SRAM_CS, OUTPUT ) ;
-  digitalWrite ( SRAM_CS, HIGH ) ;
-
-  digitalWrite ( SRAM_CS, HIGH ) ;
-  delay ( 50 ) ;
-  digitalWrite ( SRAM_CS, LOW ) ;
-  delay ( 50 ) ;
-  digitalWrite ( SRAM_CS, HIGH ) ;
-
-  SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
-  digitalWrite ( SRAM_CS, LOW ) ;
-  SPI.transfer ( 0x01 ) ;                             // Write mode register
-  SPI.transfer ( 0x00 ) ;                             // Set byte mode
-  digitalWrite ( SRAM_CS, HIGH ) ;
-  SPI.endTransaction();
-
-  bufferReset() ;                                     // Reset ringbuffer administration
-}
-#endif
 
 
 //******************************************************************************************
@@ -1457,11 +367,11 @@ void spiramSetup()
 //******************************************************************************************
 inline bool ringspace()
 {
-  #if defined ( SPIRAM )
-    return spaceAvailable() ;         // True if at least one chunk is available
-  #else
-    return ( rcount < RINGBFSIZ ) ;   // True if at least one byte of free space is available
-  #endif
+#if defined ( SRAM )
+  return spiram.spaceAvailable() ;         // True if at least one chunk is available
+#else
+  return ( rcount < RINGBFSIZ ) ;   // True if at least one byte of free space is available
+#endif
 }
 
 
@@ -1470,11 +380,11 @@ inline bool ringspace()
 //******************************************************************************************
 inline uint16_t ringavail()
 {
-  #if defined ( SPIRAM )
-    return dataAvailable() ;          // Return number of chunks filled
-  #else
-    return rcount ;                   // Return number of bytes available
-  #endif
+#if defined ( SRAM )
+  return spiram.dataAvailable() ;          // Return number of chunks filled
+#else
+  return rcount ;                   // Return number of bytes available
+#endif
 }
 
 
@@ -1483,24 +393,24 @@ inline uint16_t ringavail()
 //******************************************************************************************
 // No check on available space.  See ringspace()                                           *
 //******************************************************************************************
-void putring ( uint8_t b )              // Put one byte in the ringbuffer
+void putring ( uint8_t b )                   // Put one byte in the ringbuffer
 {
-  #if defined ( SPIRAM )
-    static uint8_t pwchunk[32] ;        // Buffer for one chunk
-    pwchunk[prcwinx++] = b ;            // Store in local chunk
-    if ( prcwinx == sizeof(pwchunk) )   // Chunk full?
-    {
-      bufferWrite ( pwchunk ) ;         // Yes, store in SPI RAM
-      prcwinx = 0 ;                     // Index to begin of chunk
-    }
-  #else
-    *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
-    if ( ++rbwindex == RINGBFSIZ )      // Increment pointer and
-    {
-      rbwindex = 0 ;                    // wrap at the end
-    }
-    rcount++ ;                          // Count number of bytes in the
-  #endif
+#if defined ( SRAM )
+  static uint8_t pwchunk[32] ;               // Buffer for one chunk
+  pwchunk[spiram.prcwinx++] = b ;            // Store in local chunk
+  if ( spiram.prcwinx == sizeof(pwchunk) )   // Chunk full?
+  {
+    spiram.bufferWrite ( pwchunk ) ;         // Yes, store in SPI RAM
+    spiram.prcwinx = 0 ;                     // Index to begin of chunk
+  }
+#else
+  *(ringbuf + rbwindex) = b ;                // Put byte in ringbuffer
+  if ( ++rbwindex == RINGBFSIZ )             // Increment pointer and
+  {
+    rbwindex = 0 ;                           // wrap at the end
+  }
+  rcount++ ;                          // Count number of bytes in the
+#endif
 }
 
 
@@ -1511,22 +421,22 @@ void putring ( uint8_t b )              // Put one byte in the ringbuffer
 //******************************************************************************************
 uint8_t getring()
 {
-  #if defined ( SPIRAM )
-    static uint8_t prchunk[32] ;          // Buffer for one chunk
-    if ( prcrinx >= sizeof(prchunk) )     // End of buffer reached?
-    {
-      prcrinx = 0 ;                       // Yes, reset index to begin of buffer
-      bufferRead ( prchunk ) ;            // And read new buffer
-    }
-    return ( prchunk[prcrinx++] ) ;
-  #else
-    if ( ++rbrindex == RINGBFSIZ )        // Increment pointer and
-    {
-      rbrindex = 0 ;                      // wrap at the end
-    }
-    rcount-- ;                            // Count is now one less
-    return *(ringbuf + rbrindex) ;        // Return the oldest byte
-  #endif
+#if defined ( SRAM )
+  static uint8_t prchunk[32] ;                 // Buffer for one chunk
+  if ( spiram.prcrinx >= sizeof(prchunk) )     // End of buffer reached?
+  {
+    spiram.prcrinx = 0 ;                       // Yes, reset index to begin of buffer
+    spiram.bufferRead ( prchunk ) ;            // And read new buffer
+  }
+  return ( prchunk[spiram.prcrinx++] ) ;
+#else
+  if ( ++rbrindex == RINGBFSIZ )               // Increment pointer and
+  {
+    rbrindex = 0 ;                             // wrap at the end
+  }
+  rcount-- ;                                   // Count is now one less
+  return *(ringbuf + rbrindex) ;               // Return the oldest byte
+#endif
 }
 
 
@@ -1535,14 +445,14 @@ uint8_t getring()
 //******************************************************************************************
 void emptyring()
 {
-  #if defined ( SPIRAM )
-    prcwinx = 0 ;
-    prcrinx = 32 ;                        // Set buffer to empty
-  #else
-    rbwindex = 0 ;                        // Reset ringbuffer administration
-    rbrindex = RINGBFSIZ - 1 ;
-    rcount = 0 ;
-  #endif
+#if defined ( SRAM )
+  spiram.prcwinx = 0 ;
+  spiram.prcrinx = 32 ;                        // Set buffer to empty
+#else
+  rbwindex = 0 ;                               // Reset ringbuffer administration
+  rbrindex = RINGBFSIZ - 1 ;
+  rcount = 0 ;
+#endif
 }
 
 
@@ -2058,7 +968,7 @@ bool connectwifi()
     WiFi.softAP ( NAME, NAME ) ;                       // This ESP will be an AP
     delay ( 5000 ) ;
     pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Address if AP
-    displayinfo ( " AP mode activated ", 2 ) ;
+    displayinfo ( "*AP mode activated*", 2 ) ;
     return false ;
   }
 
@@ -2580,61 +1490,6 @@ String xmlparse ( String mount )
 
 #if defined ( IR )
 //**************************************************************************************************
-//                                          I S R _ I R                                            *
-//**************************************************************************************************
-// Interrupts received from VS1838B on every change of the signal.                                 *
-// Intervals are 640 or 1640 microseconds for data.  syncpulses are 3400 micros or longer.         *
-// Input is complete after 65 level changes.                                                       *
-// Only the last 32 level changes are significant and will be handed over to common data.          *
-//**************************************************************************************************
-void IRAM_ATTR isr_IR()
-{
-  static volatile uint32_t      t0 = 0 ;             // To get the interval
-  static volatile uint32_t      ir_locvalue = 0 ;    // IR code
-  static volatile int           ir_loccount = 0 ;    // Length of code
-
-  uint32_t         t1, intval ;                      // Current time and interval since last change
-  uint32_t         mask_in = 2 ;                     // Mask input for conversion
-  uint16_t         mask_out = 1 ;                    // Mask output for conversion
-
-  ir_intcount++ ;                                    // Test IR input.
-  t1 = micros() ;                                    // Get current time
-  intval = t1 - t0 ;                                 // Compute interval
-  t0 = t1 ;                                          // Save for next compare
-  if ( ( intval > 300 ) && ( intval < 800 ) )        // Short pulse?
-  {
-    ir_locvalue = ir_locvalue << 1 ;                 // Shift in a "zero" bit
-    ir_loccount++ ;                                  // Count number of received bits
-    ir_0 = ( ir_0 * 3 + intval ) / 4 ;               // Compute average durartion of a short pulse
-  }
-  else if ( ( intval > 1400 ) && ( intval < 1900 ) ) // Long pulse?
-  {
-    ir_locvalue = ( ir_locvalue << 1 ) + 1 ;         // Shift in a "one" bit
-    ir_loccount++ ;                                  // Count number of received bits
-    ir_1 = ( ir_1 * 3 + intval ) / 4 ;               // Compute average durartion of a short pulse
-  }
-  else if ( ir_loccount == 65 )                      // Value is correct after 65 level changes
-  {
-    while ( mask_in )                                // Convert 32 bits to 16 bits
-    {
-      if ( ir_locvalue & mask_in )                   // Bit set in pattern?
-      {
-        ir_value |= mask_out ;                       // Set set bit in result
-      }
-      mask_in <<= 2 ;                                // Shift input mask 2 positions
-      mask_out <<= 1 ;                               // Shift output mask 1 position
-    }
-    ir_loccount = 0 ;                                // Ready for next input
-  }
-  else
-  {
-    ir_locvalue = 0 ;                                // Reset decoding
-    ir_loccount = 0 ;
-  }
-}
-
-
-//**************************************************************************************************
 //                                     S C A N I R                                                 *
 //**************************************************************************************************
 // See if IR input is available.  Execute the programmed command.                                  *
@@ -2768,8 +1623,8 @@ void setup()
   Serial.begin ( 115200 ) ;                            // For debug
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
-  #if defined ( SPIRAM )
-    spiramSetup() ;                                    // Yes, do set-up
+  #if defined ( SRAM )
+    spiram.spiramSetup() ;                                    // Yes, do set-up
     emptyring() ;                                      // Empty the buffer
   #else
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
@@ -2824,9 +1679,7 @@ void setup()
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;              // And sketch info
 #if defined ( IR )
-    dbgprint ( "Enable pin %d for IR", IR_PIN ) ;
-    pinMode ( IR_PIN, INPUT ) ;                        // Pin for IR receiver VS1838B
-    attachInterrupt ( IR_PIN, isr_IR, CHANGE ) ;       // Interrupts will be handle by isr_IR
+  setupIR();
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
   if ( vs1053player.getChipVersion() == 4 )            // Check if we are using VS1053B chip
@@ -2837,7 +1690,7 @@ void setup()
   dsp_begin();
   displayinfo ( "      Esp-radio     ", 0 ) ;
   delay ( 10 ) ;
-  displayinfo ( "      Starting      ", 2 ) ;
+  displayinfo ( "       Loading      ", 2 ) ;
 #endif
   delay ( 10 ) ;
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
@@ -2893,7 +1746,7 @@ void setup()
   {
     gettime() ;                                        // Sync time
   }
-  #if defined ( SPIRAM )
+  #if defined ( SRAM )
     dbgprint ( "Testing SPIRAM getring/putring" ) ;
     for ( int i = 0 ; i < 96 ; i++ )                   // Test for 96 bytes, 3 chunks
     {
@@ -2965,13 +1818,13 @@ void loop()
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
-    #if defined ( SPIRAM )
-      if ( spiramdelay != 0 )                          // Delay before reading SPIRAM?
-      {
-        spiramdelay-- ;                                // Yes, count down
-        break ;                                        // and skip handling of data
-      }
-    #endif
+  #if defined ( SRAM )
+    if ( spiram.spiramdelay != 0 )                            // Delay before reading SPIRAM?
+    {
+      spiram.spiramdelay-- ;                                  // Yes, count down
+      break ;                                          // and skip handling of data
+    }
+  #endif
     handlebyte_ch ( getring() ) ;                      // Yes, handle it
   }
   yield() ;
@@ -3100,8 +1953,8 @@ void loop()
       if ( NetworkFound )                              // Time available?
       {
         displaytime ( timetxt ) ;                      // Write to TFT screen
-        displayvolume() ;                              // Show volume on display
       }
+      displayvolume ( vs1053player.getVolume() ) ;     // Show volume on display
     }
     if ( scrollflag )                                  // Time to scroll?
     {
@@ -3393,9 +2246,9 @@ void handlebyte ( uint8_t b, bool force )
                       ", metaint is %d",               // and metaint
                       mbitrate, metaint ) ;
           datamode = DATA ;                            // Expecting data now
-          #if defined ( SPIRAM )
-            spiramdelay = SPIRAMDELAY ;                // Start delay
-          #endif
+        #if defined ( SRAM )
+          spiram.spiramdelay = SPIRAMDELAY ;           // Start delay
+        #endif
           //emptyring() ;                              // Empty SPIRAM buffer (not sure about this)
           datacount = metaint ;                        // Number of bytes before first metadata
           bufcnt = 0 ;                                 // Reset buffer count
@@ -3923,9 +2776,9 @@ char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-    #if defined ( SPIRAM )                            // SPI RAM used?
-      rcount = dataAvailable() ;                      // Yes, get free space
-    #endif
+  #if defined ( SRAM )                                // SPI RAM used?
+    rcount = spiram.dataAvailable() ;                 // Yes, get free space
+  #endif
     if ( mp3client )
     {
       sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
