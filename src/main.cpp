@@ -4,7 +4,7 @@
 //************************************************************************************************
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 13 Apr 2022 12:10:00 GMT"
+#define VERSION "Wed, 14 Apr 2023 12:10:00 GMT"
 //
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
@@ -41,8 +41,8 @@ extern "C"
 #if defined ( SRAM )
 #include "SPIRAM.h"
 #else
-  // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-  #define RINGBFSIZ         18000
+// Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
+#define RINGBFSIZ         18000
 #endif
 //
 // Debug buffer size
@@ -61,7 +61,8 @@ extern "C"
 #if defined ( LCD )
 #include "LCD2004.h"
 #else
-#define displayinfo(a,b)            // Empty declaration
+// Empty declaration
+#define displayinfo(a,b)
 #define displaytime(a)
 #endif
 //
@@ -208,11 +209,11 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 //******************************************************************************************
 // Pages and CSS for the webinterface.                                                     *
 //******************************************************************************************
-#include "web/about_html.h"
-#include "web/config_html.h"
-#include "web/index_html.h"
-#include "web/radio_css.h"
-#include "web/favicon_ico.h"
+#include "html/about_html.h"
+#include "html/config_html.h"
+#include "html/index_html.h"
+#include "html/radio_css.h"
+#include "html/favicon_ico.h"
 
 
 //**************************************************************************************************
