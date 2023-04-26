@@ -1489,126 +1489,6 @@ String xmlparse ( String mount )
 }
 
 
-#if defined ( IR )
-//**************************************************************************************************
-//                                     S C A N I R                                                 *
-//**************************************************************************************************
-// See if IR input is available.  Execute the programmed command.                                  *
-//**************************************************************************************************
-void scanIR()
-{
-  if ( ir_value )                                           // Any input?
-  {
-    if ( ir_value == ir_preset1 )
-    {
-      ini_block.newpreset = 1 ;
-      dbgprint ( "IR code %04X - ir_preset1", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset2 )
-    {
-      ini_block.newpreset = 2 ;
-      dbgprint ( "IR code %04X - ir_preset2", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset3 )
-    {
-      ini_block.newpreset = 3 ;
-      dbgprint ( "IR code %04X - ir_preset3", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset4 )
-    {
-      ini_block.newpreset = 4 ;
-      dbgprint ( "IR code %04X - ir_preset4", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset5 )
-    {
-      ini_block.newpreset = 5 ;
-      dbgprint ( "IR code %04X - ir_preset5", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset6 )
-    {
-      ini_block.newpreset = 6 ;
-      dbgprint ( "IR code %04X - ir_preset3", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset7 )
-    {
-      ini_block.newpreset = 7 ;
-      dbgprint ( "IR code %04X - ir_preset7", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset8 )
-    {
-      ini_block.newpreset = 8 ;
-      dbgprint ( "IR code %04X - ir_preset8", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset9 )
-    {
-      ini_block.newpreset = 9 ;
-      dbgprint ( "IR code %04X - ir_preset9", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset0 )
-    {
-      ini_block.newpreset = 0 ;
-      dbgprint ( "IR code %04X - ir_preset0", ir_value ) ;
-    }
-    else if ( ir_value == ir_stop )
-    {
-      analyzeCmd("stop");
-      dbgprint ( "IR code %04X - ir_stop", ir_value ) ;
-    }
-    else if ( ir_value == ir_play )
-    {
-      analyzeCmd("resume");
-      dbgprint ( "IR code %04X - ir_play", ir_value ) ;
-    }
-    else if ( ir_value == ir_volup )
-    {
-      if ( ini_block.reqvol < 100 )
-      {
-        ini_block.reqvol = vs1053player.getVolume() + 2 ;
-      }
-      else
-      {
-        ini_block.reqvol = 100 ;
-      }
-      dbgprint ( "IR code %04X - ir_volup", ir_value ) ;
-    }
-    else if ( ir_value == ir_voldown )
-    {
-      if ( ini_block.reqvol < 0 )
-      {
-        ini_block.reqvol = 0 ;
-      }
-      else
-      {        
-        ini_block.reqvol = vs1053player.getVolume() - 2 ;
-      }
-      dbgprint ( "IR code %04X - ir_voldown", ir_value ) ;
-    }
-    else if ( ir_value == ir_mute )
-    {
-      muteflag = !muteflag;
-      dbgprint ( "IR code %04X - ir_mute", ir_value ) ;
-    }
-    else if ( ir_value == ir_next )
-    {
-      ini_block.newpreset = currentpreset + 1 ;
-      dbgprint ( "IR code %04X - ir_next", ir_value ) ;
-    }
-    else if ( ir_value == ir_prev )
-    {
-      ini_block.newpreset = currentpreset - 1 ;
-      dbgprint ( "IR code %04X - ir_prev", ir_value ) ;
-    }
-    else
-    {
-      dbgprint ( "IR code %04X received, but not found in the configuration! Timing %d/%d",
-                 ir_value, ir_0, ir_1 ) ;
-    }
-    ir_value = 0 ;                                          // Reset IR code received
-  }
-}
-#endif
-
-
 //******************************************************************************************
 //                                   S E T U P                                             *
 //******************************************************************************************
@@ -2606,8 +2486,7 @@ String chomp ( String str )
 //   station    = <URL>.m3u                 // Select playlist (will not be saved)         *
 //   stop                                   // Stop playing                                *
 //   resume                                 // Resume playing                              *
-//   mute                                   // Mute the music                              *
-//   unmute                                 // Unmute the music                            *
+//   mute                                   // Mute/unmute the music (toggle)              *
 //   wifi_00    = mySSID/mypassword         // Set WiFi SSID and password *)               *
 //   mqttbroker = mybroker.com              // Set MQTT broker to use *)                   *
 //   mqttport   = 1883                      // Set MQTT port to use, default 1883 *)       *
@@ -2616,7 +2495,7 @@ String chomp ( String str )
 //   mqtttopic  = mytopic                   // Set MQTT topic to subscribe to *)           *
 //   mqttpubtopic = mypubtopic              // Set MQTT topic to publish to *)             *
 //   status                                 // Show current URL to play                    *
-//   testfile   = <file on LittleFS>          // Test LittleFS reads for debugging purpose     *
+//   testfile   = <file on LittleFS>        // Test LittleFS reads for debugging purpose   *
 //   test                                   // For test purposes                           *
 //   debug      = 0 or 1                    // Switch debugging on or off                  *
 //   reset                                  // Restart the ESP8266                         *
@@ -2683,13 +2562,9 @@ char* analyzeCmd ( const char* par, const char* val )
     sprintf ( reply, "Volume is now %d",              // Reply new volume
               ini_block.reqvol ) ;
   }
-  else if ( argument == "mute" )                      // Mute request
+  else if ( argument == "mute" )                      // Mute/unmute request
   {
-    muteflag = true ;                                 // Request volume to zero
-  }
-  else if ( argument == "unmute" )                    // Unmute request?
-  {
-    muteflag = false ;                                // Request normal volume
+    muteflag = !muteflag ;                            // Request volume to zero/normal
   }
   else if ( argument.indexOf ( "preset" ) >= 0 )      // Preset station?
   {

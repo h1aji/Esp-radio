@@ -6,6 +6,7 @@ const char index_html[] PROGMEM = R"=====(
  <head>
   <title>ESP-radio</title>
   <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+  <link rel="stylesheet" type="text/css" href="radio.css">
   <link rel="Shortcut Icon" type="image/ico" href="favicon.ico">
  </head>
  <body>
@@ -139,7 +140,7 @@ const char index_html[] PROGMEM = R"=====(
    <br>
    <input type="text" width="600px" size="72" id="resultstr" placeholder="Waiting for a command...."><br>
    <br><br>
-   <p>Find new radio stations at <a target="blank" href="http://www.internet-radio.com">http://www.internet-radio.com</a></p>
+   <p>Find new radio stations on <a target="blank" href="https://www.internet-radio.com">www.internet-radio.com</a></p>
    <p>Examples: us1.internet-radio.com:8105, skonto.ls.lv:8002/mp3, 85.17.121.103:8800</p><br>
   </center>
   <script>
@@ -193,6 +194,24 @@ const char index_html[] PROGMEM = R"=====(
      xhr.open ( "GET", theUrl, false ) ;
      xhr.send() ;
    }
+
+   function selectItemByValue(elmnt, value)
+   {
+     var sel = document.getElementById(elmnt) ;
+     for(var i=0; i < sel.options.length; i++)
+     {
+       if(sel.options[i].value == value)
+         sel.selectedIndex = i;
+     }
+   }
+   
+   // Request current status.
+   function myRefresh()
+   {
+    httpGet ('status') ;
+    setTimeout(myRefresh,5000) ;
+   }
+
    // Fill preset list initially
    //
    var i, select, opt, stations ;
@@ -212,15 +231,8 @@ const char index_html[] PROGMEM = R"=====(
        }
      }
    }
-   xhr.open ( "GET", theUrl, false ) ;
-   xhr.send() ;
-  </script>
-  <script type="text/javascript">
-    var stylesheet = document.createElement('link') ;
-    stylesheet.href = 'radio.css' ;
-    stylesheet.rel = 'stylesheet' ;
-    stylesheet.type = 'text/css' ;
-    document.getElementsByTagName('head')[0].appendChild(stylesheet) ;
+     xhr.open ( "GET", theUrl, false ) ;
+     xhr.send() ;
   </script>
  </body>
 </html>

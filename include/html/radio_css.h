@@ -45,8 +45,8 @@ li a:hover, a.active {
 }
 
 .button {
-   width: 80px;
-   height: 40px;
+   min-width: 80px;
+   height: 30px;
    background-color: #128F76;
    border: none;
    color: white;
@@ -57,13 +57,10 @@ li a:hover, a.active {
    margin: 4px 2px;
    cursor: pointer;
    border-radius: 10px;
+   white-space: nowrap;
 }
 
 .buttonr {background-color: #D62C1A;}
-
-.button-play {
-   height: 30px;
-}
 
 .select {
    width: 160px;
@@ -126,4 +123,6 @@ textarea {
   font-family: Courier, "Lucida Console", monospace;
   background-color: white;
   resize: none;
-})=====" ;
+}
+
+)=====" ;
