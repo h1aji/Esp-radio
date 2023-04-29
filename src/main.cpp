@@ -59,7 +59,7 @@ extern "C"
 // Define LCD if you are using LCD 2004
 #define LCD
 #if defined ( LCD )
-#include "LCD2004.h"
+  #include "LCD2004.h"
 #else
 // Empty declaration
 #define displayinfo(a,b)
@@ -69,7 +69,7 @@ extern "C"
 // Enable support for IR by uncommenting the next line
 #define IR
 #if defined ( IR )
-#include "IR.h"
+  #include "IR.h"
 #endif
 
 //
@@ -85,8 +85,8 @@ void   handleCmd ( AsyncWebServerRequest* request )  ;
 void   handleFileUpload ( AsyncWebServerRequest* request, String filename,
                           size_t index, uint8_t* data, size_t len, bool final ) ;
 char*  dbgprint( const char* format, ... ) ;
-char*  analyzeCmd ( const char* str ) ;
-char*  analyzeCmd ( const char* par, const char* val ) ;
+const char* analyzeCmd ( const char* str ) ;
+const char* analyzeCmd ( const char* par, const char* val ) ;
 String chomp ( String str ) ;
 void   publishIP() ;
 String xmlparse ( String mount ) ;
@@ -1168,7 +1168,7 @@ void onMqttUnsubscribe ( uint16_t packetId )
 void onMqttMessage ( char* topic, char* payload, AsyncMqttClientMessageProperties properties,
                      size_t len, size_t index, size_t total )
 {
-  char*  reply ;                                    // Result from analyzeCmd
+  const char*  reply ;                              // Result from analyzeCmd
 
   // Available properties.qos, properties.dup, properties.retain
   if ( len >= sizeof(cmd) )                         // Message may not be too long
@@ -1205,7 +1205,7 @@ void scanserial()
 {
   static String serialcmd ;                      // Command from Serial input
   char          c ;                              // Input character
-  char*         reply ;                          // Reply string froma analyzeCmd
+  const char*   reply = "" ;                     // Reply string from analyzeCmd
   uint16_t      len ;                            // Length of input string
 
   while ( Serial.available() )                   // Any input seen?
@@ -1218,7 +1218,7 @@ void scanserial()
       if ( len )
       {
         strncpy ( cmd, serialcmd.c_str(), sizeof(cmd) ) ;
-        reply = analyzeCmd ( cmd) ;              // Analyze command and handle it
+        reply = analyzeCmd ( cmd ) ;             // Analyze command and handle it
         dbgprint ( reply ) ;                     // Result for debugging
         serialcmd = "" ;                         // Prepare for new command
       }
@@ -2425,21 +2425,23 @@ void handleFS ( AsyncWebServerRequest* request )
 // Handling of the various commands from remote webclient, Serial or MQTT.                 *
 // Version for handling string with: <parameter>=<value>                                   *
 //******************************************************************************************
-char* analyzeCmd ( const char* str )
+const char* analyzeCmd ( const char* str )
 {
-  char*  value ;                                 // Points to value after equalsign in command
+  char*        value ;                           // Points to value after equalsign in command
+  const char*  res ;                             // Result of analyzeCmd
 
   value = strstr ( str, "=" ) ;                  // See if command contains a "="
   if ( value )
   {
     *value = '\0' ;                              // Separate command from value
-    value++ ;                                    // Points to value after "="
+    res = analyzeCmd ( str, value + 1 ) ;        // Analyze command and handle it
+    *value = '=' ;                               // Restore equal sign
   }
   else
   {
-    value = (char*) "0" ;                        // No value, assume zero
+    res = analyzeCmd ( str, "0" ) ;              // No value, assume zero
   }
-  return  analyzeCmd ( str, value ) ;            // Analyze command and handle it
+  return res ;
 }
 
 
@@ -2503,7 +2505,7 @@ String chomp ( String str )
 // Commands marked with "*)" are sensible in ini-file only                                 *
 // Note that it is adviced to avoid expressions as the argument for the abs function.      *
 //******************************************************************************************
-char* analyzeCmd ( const char* par, const char* val )
+const char* analyzeCmd ( const char* par, const char* val )
 {
   String             argument ;                       // Argument as string
   String             value ;                          // Value of an argument as a string
