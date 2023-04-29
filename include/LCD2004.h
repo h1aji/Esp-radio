@@ -92,8 +92,8 @@ LCD2004* lcd = NULL ;
 
 bool dsp_begin()
 {
-  dbgprint ( "Init I2C LCD2004: SDA on GPIO %d, \
-              SCL on GPIO %d", LCD_SDA_PIN, LCD_SCL_PIN ) ;
+  dbgprint ( "Init I2C LCD2004: SDA pin %d, SCL pin %d",
+                                LCD_SDA_PIN, LCD_SCL_PIN ) ;
   if ( ( LCD_SDA_PIN == 4 ) && ( LCD_SCL_PIN == 5 ) )       // Make sure correct pins are used
   {
     lcd = new LCD2004 ( LCD_SDA_PIN, LCD_SCL_PIN ) ;        // Create an instance for LCD

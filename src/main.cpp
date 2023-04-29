@@ -1505,10 +1505,14 @@ void setup()
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
   #if defined ( SRAM )
-    spiram.spiramSetup() ;                                    // Yes, do set-up
+    spiram.spiramSetup() ;                             // Yes, do set-up
     emptyring() ;                                      // Empty the buffer
   #else
+    ESP.setExternalHeap();                             // Set external memory to use
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
+    dbgprint ( "External buffer: Address %p, free %d\n",
+                                    ringbuf, ESP.getFreeHeap() ) ;
+    ESP.resetHeap();
   #endif
   xml.init ( xmlbuffer, sizeof(xmlbuffer),             // Initilize XML stream.
              &XML_callback ) ;
