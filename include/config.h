@@ -13,7 +13,7 @@
 #define INIFILENAME "/radio.ini"
 //
 // Add a fixed SSID to the list (WiFi only) e.g LAPTOP-99/wifiwifi
-#define FIXEDWIFI ""
+//#define FIXEDWIFI ""
 //
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
 #define RINGBFSIZ         16000
@@ -32,7 +32,7 @@
 #define MAXMQTTCONNECTS     20
 //
 // Use 23LC1024 SPI RAM as ringbuffer
-//#define SRAM
+#define SRAM
 //
 // Define LCD if you are using LCD 2004
 #define LCD

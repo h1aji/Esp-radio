@@ -191,8 +191,6 @@ void SPIRAM::spiramSetup()
   SPI.begin();
   pinMode ( Cs, OUTPUT ) ;
   digitalWrite ( Cs, HIGH ) ;
-
-  digitalWrite ( Cs, HIGH ) ;
   delay ( 50 ) ;
   digitalWrite ( Cs, LOW ) ;
   delay ( 50 ) ;
