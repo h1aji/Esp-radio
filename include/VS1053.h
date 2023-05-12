@@ -5,6 +5,7 @@
 //******************************************************************************************
 //
 
+#include "SPI.h"
 #include "vs1053b-patches.h"
 
 // Digital I/O used
@@ -264,6 +265,7 @@ void VS1053::begin()
   digitalWrite ( dcs_pin,   HIGH ) ;                    // Back to normal again
   digitalWrite ( cs_pin,    HIGH ) ;
   delay ( 500 ) ;
+  SPI.begin() ;                                        // Init SPI bus
   // Init SPI in slow mode ( 0.2 MHz )
   VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
   //printDetails ( "Right after reset/startup" ) ;

@@ -4,12 +4,10 @@
 //************************************************************************************************
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 14 Apr 2023 12:10:00 GMT"
 //
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
 #include <LittleFS.h>
-#include <SPI.h>
 #include <stdio.h>
 #include <string.h>
 #include <Ticker.h>
@@ -26,38 +24,12 @@ extern "C"
   #include <user_interface.h>
 }
 //
-// Definitions for 3 control switches on analog input
-// You can test the analog input values by holding down the switch and select /?analog=1
-// in the web interface. See schematics in the documentation.
-// Switches are programmed as "Goto station 1", "Next station" and "Previous station" respectively.
-// Set these values to 2000 if not used or tie analog input to ground.
-#define NUMANA  3
-#define asw1    2000
-#define asw2    2000
-#define asw3    2000
+#include "config.h"                                        // Specify configuration
 //
-// Use 23LC1024 SPI RAM as ringbuffer
-#define SRAM
 #if defined ( SRAM )
-#include "SPIRAM.h"
-#else
-// Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-#define RINGBFSIZ         18000
+  #include "SPIRAM.h"
 #endif
 //
-// Debug buffer size
-#define DEBUG_BUFFER_SIZE   100
-// Name of the ini file
-#define INIFILENAME "/radio.ini"
-// Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
-// Not that the password of an AP must be at least as long as 8 characters.
-// Also used for other naming.
-#define NAME "Esp-radio"
-// Maximum number of MQTT reconnects before give-up
-#define MAXMQTTCONNECTS     20
-//
-// Define LCD if you are using LCD 2004
-#define LCD
 #if defined ( LCD )
   #include "LCD2004.h"
 #else
@@ -66,12 +38,9 @@ extern "C"
 #define displaytime(a)
 #endif
 //
-// Enable support for IR by uncommenting the next line
-#define IR
 #if defined ( IR )
   #include "IR.h"
 #endif
-
 //
 //******************************************************************************************
 // Forward declaration of various functions                                                *
@@ -94,9 +63,9 @@ void   XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
                     char* data,  uint16_t dataLen ) ;
 bool   connecttohost() ;
 void   gettime() ;
-char   utf8ascii ( char ascii ) ;                             // Convert UTF to Ascii
-void   utf8ascii_ip ( char* s ) ;                             // Convert UTF to Ascii in place
-String utf8ascii ( const char* s ) ;                          // Convert UTF to Ascii as String
+char   utf8ascii ( char ascii ) ;                          // Convert UTF to Ascii
+void   utf8ascii_ip ( char* s ) ;                          // Convert UTF to Ascii in place
+String utf8ascii ( const char* s ) ;                       // Convert UTF to Ascii as String
 void   scan_content_length ( const char* metalinebf ) ;
 
 //
@@ -185,6 +154,7 @@ struct tm        timeinfo ;                                // Will be filled by 
 char             timetxt[9] ;                              // Converted timeinfo
 bool             time_req = false ;                        // Set time requested
 uint32_t         clength ;                                 // Content length found in http header
+const char*      fixedwifi = "" ;                          // Used for FIXEDWIFI option
 
 
 // XML parse globals.
@@ -337,7 +307,7 @@ void gettime()
       {
         dbgprint ( "Sync TOD" ) ;
       }
-      if ( !getLocalTime ( &timeinfo ) )              // Read from NTP server
+      if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
       {
         dbgprint ( "Failed to obtain time!" ) ;             // Error
         timeinfo.tm_year = 0 ;                              // Set current time to illegal
@@ -371,7 +341,7 @@ inline bool ringspace()
 #if defined ( SRAM )
   return spiram.spaceAvailable() ;         // True if at least one chunk is available
 #else
-  return ( rcount < RINGBFSIZ ) ;   // True if at least one byte of free space is available
+  return ( rcount < RINGBFSIZ ) ;          // True if at least one byte of free space is available
 #endif
 }
 
@@ -384,7 +354,7 @@ inline uint16_t ringavail()
 #if defined ( SRAM )
   return spiram.dataAvailable() ;          // Return number of chunks filled
 #else
-  return rcount ;                   // Return number of bytes available
+  return rcount ;                          // Return number of bytes available
 #endif
 }
 
@@ -410,7 +380,7 @@ void putring ( uint8_t b )                   // Put one byte in the ringbuffer
   {
     rbwindex = 0 ;                           // wrap at the end
   }
-  rcount++ ;                          // Count number of bytes in the
+  rcount++ ;                                 // Count number of bytes in the
 #endif
 }
 
@@ -635,12 +605,12 @@ void IRAM_ATTR timer10sec()
 //******************************************************************************************
 uint8_t anagetsw ( uint16_t v )
 {
-  int      i ;                                    // Loop control
-  int      oldmindist = 1000 ;                    // Detection least difference
-  int      newdist ;                              // New found difference
-  uint8_t  sw = 0 ;                               // Number of switch detected (0 or 1..3)
+  int      i ;                                     // Loop control
+  int      oldmindist = 1000 ;                     // Detection least difference
+  int      newdist ;                               // New found difference
+  uint8_t  sw = 0 ;                                // Number of switch detected (0 or 1..3)
 
-  if ( v > analogrest )                           // Inactive level?
+  if ( v > analogrest )                            // Inactive level?
   {
     for ( i = 0 ; i < NUMANA ; i++ )
     {
@@ -1080,7 +1050,7 @@ void publishIP()
   IPAddress ip ;
   char      ipstr[20] ;                          // Hold IP as string
 
-  if ( ini_block.mqttpubtopic.length() )        // Topic to publish?
+  if ( ini_block.mqttpubtopic.length() )         // Topic to publish?
   {
     ip = WiFi.localIP() ;
     // Publish IP-adress.  qos=1, retain=true
@@ -1254,7 +1224,22 @@ void mk_lsan()
   anetworks = "|" ;                                    // Initial value
   path = String ( INIFILENAME ) ;                      // Form full path
   inifile = LittleFS.open ( path, "r" ) ;              // Open the file
-  if ( inifile )
+  
+  if ( *fixedwifi )                                    // FIXEDWIFI set and not empty?
+  {
+    line = String ( fixedwifi ) ;
+    inx = line.indexOf ( "/" ) ;                       // Find separator between ssid and password
+    if ( inx > 0 )                                     // Separator found?
+      {
+        ssid = ssid.substring ( 5, inx ) ;             // Line holds SSID now
+        dbgprint ( "Added SSID %s to acceptable networks",
+                  ssid.c_str() ) ;
+        anetworks += ssid ;                            // Add to list
+        anetworks += "|" ;                             // Separator
+        num_an++ ;                                     // Count number oif acceptable networks
+      }
+  }
+  else if ( inifile )
   {
     while ( inifile.available() )
     {
@@ -1471,7 +1456,7 @@ String xmlparse ( String mount )
     tmpstr[0] = '\0' ;                            
     if ( urlfound )
     {
-      sprintf ( tmpstr, "%s:%s/%s_SC",                   // Build URL for ESP-Radio to stream.
+      sprintf ( tmpstr, "%s:%s/%s_SC",                 // Build URL for ESP-Radio to stream.
                         stationServer.c_str(),
                         stationPort.c_str(),
                         stationMount.c_str() ) ;
@@ -1508,11 +1493,15 @@ void setup()
     spiram.spiramSetup() ;                             // Yes, do set-up
     emptyring() ;                                      // Empty the buffer
   #else
-    ESP.setExternalHeap();                             // Set external memory to use
+    //ESP.setExternalHeap();                             // Set external memory to use
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
     dbgprint ( "External buffer: Address %p, free %d\n",
                                     ringbuf, ESP.getFreeHeap() ) ;
-    ESP.resetHeap();
+    //ESP.resetHeap();
+  #endif
+
+  #ifdef FIXEDWIFI                                     // Set fixedwifi if defined
+    fixedwifi = FIXEDWIFI ;
   #endif
   xml.init ( xmlbuffer, sizeof(xmlbuffer),             // Initilize XML stream.
              &XML_callback ) ;
@@ -1556,7 +1545,6 @@ void setup()
   WiFi.disconnect() ;                                  // The router may keep the old connection
   WiFi.mode ( WIFI_STA ) ;                             // This ESP is a station
   wifi_station_set_hostname ( (char*)NAME ) ;
-  SPI.begin() ;                                        // Init SPI bus
   dbgprint ( "Starting ESP Version %s...  Free memory %d",
              VERSION,
              system_get_free_heap_size() ) ;           // Print some memory info
@@ -1704,9 +1692,9 @@ void loop()
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
   #if defined ( SRAM )
-    if ( spiram.spiramdelay != 0 )                            // Delay before reading SPIRAM?
+    if ( spiram.spiramdelay != 0 )                     // Delay before reading SPIRAM?
     {
-      spiram.spiramdelay-- ;                                  // Yes, count down
+      spiram.spiramdelay-- ;                           // Yes, count down
       break ;                                          // and skip handling of data
     }
   #endif

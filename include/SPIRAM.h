@@ -5,6 +5,7 @@
 //***************************************************************************************************
 //
 
+#include "SPI.h"
 
 #define SRAM_CS           15                                // CS pin is connected to GPIO 15
 #define SRAM_FREQ         20e6                              // 23LC1024 supports theorically up to 20MHz
@@ -50,11 +51,17 @@ SPIRAM spiram ;
 //******************************************************************************************
 uint32_t SPIRAM::spiTransfer32 ( uint32_t data )
 {
-  union { uint32_t val; struct { uint16_t lsb; uint16_t msb; }; } in, out;
-  in.val = data;
+  union {
+      uint32_t val ;
+      struct {
+          uint16_t lsb ;
+          uint16_t msb ;
+      } ;
+  } in, out ;
+  in.val = data ;
   out.msb = SPI.transfer16 ( in.msb ) ;
   out.lsb = SPI.transfer16 ( in.lsb ) ;
-  return out.val;
+  return out.val ;
 }
 
 void SPIRAM::spiramWrite ( uint32_t addr, uint8_t *buff, uint32_t size )
