@@ -1,5 +1,5 @@
 //***************************************************************************************************
-//*  IR.h -- Driver for Infrared receiver                                                           *
+//   IR.h - Driver for Infrared receiver                                                            *
 //***************************************************************************************************
 //                                                                                                  *
 //***************************************************************************************************
@@ -9,7 +9,8 @@
 
 #define IR_PIN   0          // Set IR pin to GPIO 0
 
-char*      dbgprint ( const char* format, ... ) ;  // Print a formatted debug line
+char*  dbgprint ( const char* format, ... ) ;  // Print a formatted debug line
+const  char*  analyzeCmd ( const char* str ) ;
 
 uint16_t   ir_preset1 = 0xA25D ;
 uint16_t   ir_preset2 = 0x629D ;
@@ -87,6 +88,129 @@ void IRAM_ATTR isr_IR()
   {
     ir_locvalue = 0 ;                                // Reset decoding
     ir_loccount = 0 ;
+  }
+}
+
+
+//**************************************************************************************************
+//                                     S C A N I R                                                 *
+//**************************************************************************************************
+// See if IR input is available.  Execute the programmed command.                                  *
+//**************************************************************************************************
+void scanIR()
+{
+  const char* reply ;                                       // Result of analyzeCmd
+
+  if ( ir_value )                                           // Any input?
+  {
+    if ( ir_value == ir_preset1 )
+    {
+      dbgprint ( "IR code %04X - ir_preset1", ir_value ) ;
+      reply = analyzeCmd ("preset=1") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_preset2 )
+    {
+      dbgprint ( "IR code %04X - ir_preset2", ir_value ) ;
+      reply = analyzeCmd ("preset=2") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_preset3 )
+    {
+      dbgprint ( "IR code %04X - ir_preset3", ir_value ) ;
+      reply = analyzeCmd ("preset=3") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_preset4 )
+    {
+      dbgprint ( "IR code %04X - ir_preset4", ir_value ) ;
+      reply = analyzeCmd ("preset=4") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_preset5 )
+    {
+      dbgprint ( "IR code %04X - ir_preset5", ir_value ) ;
+      reply = analyzeCmd ("preset=5") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_preset6 )
+    {
+      dbgprint ( "IR code %04X - ir_preset3", ir_value ) ;
+      reply = analyzeCmd ("preset=6") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_preset7 )
+    {
+      dbgprint ( "IR code %04X - ir_preset7", ir_value ) ;
+      reply = analyzeCmd ("preset=7") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_preset8 )
+    {
+      dbgprint ( "IR code %04X - ir_preset8", ir_value ) ;
+      reply = analyzeCmd ("preset=8") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_preset9 )
+    {
+      dbgprint ( "IR code %04X - ir_preset9", ir_value ) ;
+      reply = analyzeCmd ("preset=9") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_preset0 )
+    {
+      dbgprint ( "IR code %04X - ir_preset0", ir_value ) ;
+      reply = analyzeCmd ("preset=0") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_stop )
+    {
+      dbgprint ( "IR code %04X - ir_stop", ir_value ) ;
+      reply = analyzeCmd ("stop") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_play )
+    {
+      dbgprint ( "IR code %04X - ir_play", ir_value ) ;
+      reply = analyzeCmd ("resume") ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_volup )
+    {
+      dbgprint ( "IR code %04X - ir_volup", ir_value ) ;
+      reply = analyzeCmd ( "upvolume=5" ) ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_voldown )
+    {
+      dbgprint ( "IR code %04X - ir_voldown", ir_value ) ;
+      reply = analyzeCmd ( "downvolume=5" ) ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_mute )
+    {
+      dbgprint ( "IR code %04X - ir_mute", ir_value ) ;
+      reply = analyzeCmd ( "mute" ) ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_next )
+    {
+      dbgprint ( "IR code %04X - ir_next", ir_value ) ;
+      reply = analyzeCmd ( "uppreset=1" ) ;
+      dbgprint ( reply ) ;
+    }
+    else if ( ir_value == ir_prev )
+    {
+      dbgprint ( "IR code %04X - ir_prev", ir_value ) ;
+      reply = analyzeCmd ( "downpreset=1" ) ;               // Analyze command and handle it
+      dbgprint ( reply ) ;                                  // Result for debugging
+    }
+    else
+    {
+      dbgprint ( "IR code %04X received, but not found in the configuration! Timing %d/%d",
+                 ir_value, ir_0, ir_1 ) ;
+    }
+    ir_value = 0 ;                                          // Reset IR code received
   }
 }
 

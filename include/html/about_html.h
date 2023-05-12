@@ -7,6 +7,7 @@ const char about_html[] PROGMEM = R"=====(
   <title>About ESP-radio</title>
   <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
   <link rel="Shortcut Icon" type="image/ico" href="favicon.ico">
+  <link rel="stylesheet" type="text/css" href="radio.css">
  </head>
  <body>
   <ul>
@@ -19,20 +20,13 @@ const char about_html[] PROGMEM = R"=====(
   <center>
    <h1>** ESP Radio **</h1>
   </center>
-	<p>Esp-radio - Webradio receiver for ESP8266, LCD2004 monochrome display and VS1053 MP3 module.<br>
+	<p>Esp-radio - web radio receiver for ESP8266 and VS1053 MP3 module.<br>
 	This project is available on <a target="blank" href="https://github.com/h1aji/Esp-radio">Github</a>.</p>
 	<p>Author: Ed Smallenburg<br>
   Modified by: Murad Ustarkhanov<br>
-	Webinterface design: <a target="blank" href="http://www.sanderjochems.nl/">Sander Jochems</a><br>
-	App (Android): <a target="blank" href="https://play.google.com/store/apps/details?id=com.thunkable.android.sander542jochems.ESP_Radio">Sander Jochems</a><br>
+	Web interface design: <a target="blank" href="http://www.sanderjochems.nl/">Sander Jochems</a><br>
+	Android App: <a target="blank" href="https://play.google.com/store/apps/details?id=com.thunkable.android.sander542jochems.ESP_Radio">Sander Jochems</a><br>
 	First Released in January 2017</p>
-  <script type="text/javascript">
-    var stylesheet = document.createElement('link') ;
-    stylesheet.href = 'radio.css' ;
-    stylesheet.rel = 'stylesheet' ;
-    stylesheet.type = 'text/css' ;
-    document.getElementsByTagName('head')[0].appendChild(stylesheet) ;
-  </script>
  </body>
 </html>
 )=====" ;

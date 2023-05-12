@@ -1,5 +1,5 @@
 //***************************************************************************************************
-//*  LCD2004.h -- Driver for LCD 2004 display with I2C backpack.                                    *
+//   LCD2004.h - Driver for LCD 2004 display with I2C backpack.                                     *
 //***************************************************************************************************
 // The backpack communicates with the I2C bus and converts the serial data to parallel for the      *
 // 2004 board.                                                                                      *
@@ -17,7 +17,7 @@
 //  7    D7           Data bit 7                                                                    *
 //***************************************************************************************************
 //
-// Note that the display function are limited due to the minimal available space.
+// Note that the display functions are limited due to the minimal available space.
 
 #include <Wire.h>
 
@@ -92,8 +92,8 @@ LCD2004* lcd = NULL ;
 
 bool dsp_begin()
 {
-  dbgprint ( "Init I2C LCD2004: SDA on GPIO %d, \
-              SCL on GPIO %d", LCD_SDA_PIN, LCD_SCL_PIN ) ;
+  dbgprint ( "Init I2C LCD2004: SDA pin %d, SCL pin %d",
+                                LCD_SDA_PIN, LCD_SCL_PIN ) ;
   if ( ( LCD_SDA_PIN == 4 ) && ( LCD_SCL_PIN == 5 ) )       // Make sure correct pins are used
   {
     lcd = new LCD2004 ( LCD_SDA_PIN, LCD_SCL_PIN ) ;        // Create an instance for LCD

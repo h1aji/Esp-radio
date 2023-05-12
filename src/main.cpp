@@ -4,12 +4,10 @@
 //************************************************************************************************
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 13 Apr 2022 12:10:00 GMT"
 //
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
 #include <LittleFS.h>
-#include <SPI.h>
 #include <stdio.h>
 #include <string.h>
 #include <Ticker.h>
@@ -26,51 +24,23 @@ extern "C"
   #include <user_interface.h>
 }
 //
-// Definitions for 3 control switches on analog input
-// You can test the analog input values by holding down the switch and select /?analog=1
-// in the web interface. See schematics in the documentation.
-// Switches are programmed as "Goto station 1", "Next station" and "Previous station" respectively.
-// Set these values to 2000 if not used or tie analog input to ground.
-#define NUMANA  3
-#define asw1    2000
-#define asw2    2000
-#define asw3    2000
+#include "config.h"                                        // Specify configuration
 //
-// Use 23LC1024 SPI RAM as ringbuffer
-#define SRAM
 #if defined ( SRAM )
-#include "SPIRAM.h"
-#else
-  // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-  #define RINGBFSIZ         18000
+  #include "SPIRAM.h"
 #endif
 //
-// Debug buffer size
-#define DEBUG_BUFFER_SIZE   100
-// Name of the ini file
-#define INIFILENAME "/radio.ini"
-// Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
-// Not that the password of an AP must be at least as long as 8 characters.
-// Also used for other naming.
-#define NAME "Esp-radio"
-// Maximum number of MQTT reconnects before give-up
-#define MAXMQTTCONNECTS     20
-//
-// Define LCD if you are using LCD 2004
-#define LCD
 #if defined ( LCD )
-#include "LCD2004.h"
+  #include "LCD2004.h"
 #else
-#define displayinfo(a,b)            // Empty declaration
+// Empty declaration
+#define displayinfo(a,b)
 #define displaytime(a)
 #endif
 //
-// Enable support for IR by uncommenting the next line
-#define IR
 #if defined ( IR )
-#include "IR.h"
+  #include "IR.h"
 #endif
-
 //
 //******************************************************************************************
 // Forward declaration of various functions                                                *
@@ -84,8 +54,8 @@ void   handleCmd ( AsyncWebServerRequest* request )  ;
 void   handleFileUpload ( AsyncWebServerRequest* request, String filename,
                           size_t index, uint8_t* data, size_t len, bool final ) ;
 char*  dbgprint( const char* format, ... ) ;
-char*  analyzeCmd ( const char* str ) ;
-char*  analyzeCmd ( const char* par, const char* val ) ;
+const char* analyzeCmd ( const char* str ) ;
+const char* analyzeCmd ( const char* par, const char* val ) ;
 String chomp ( String str ) ;
 void   publishIP() ;
 String xmlparse ( String mount ) ;
@@ -93,9 +63,9 @@ void   XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
                     char* data,  uint16_t dataLen ) ;
 bool   connecttohost() ;
 void   gettime() ;
-char   utf8ascii ( char ascii ) ;                             // Convert UTF to Ascii
-void   utf8ascii_ip ( char* s ) ;                             // Convert UTF to Ascii in place
-String utf8ascii ( const char* s ) ;                          // Convert UTF to Ascii as String
+char   utf8ascii ( char ascii ) ;                          // Convert UTF to Ascii
+void   utf8ascii_ip ( char* s ) ;                          // Convert UTF to Ascii in place
+String utf8ascii ( const char* s ) ;                       // Convert UTF to Ascii as String
 void   scan_content_length ( const char* metalinebf ) ;
 
 //
@@ -184,6 +154,7 @@ struct tm        timeinfo ;                                // Will be filled by 
 char             timetxt[9] ;                              // Converted timeinfo
 bool             time_req = false ;                        // Set time requested
 uint32_t         clength ;                                 // Content length found in http header
+const char*      fixedwifi = "" ;                          // Used for FIXEDWIFI option
 
 
 // XML parse globals.
@@ -208,11 +179,11 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 //******************************************************************************************
 // Pages and CSS for the webinterface.                                                     *
 //******************************************************************************************
-#include "web/about_html.h"
-#include "web/config_html.h"
-#include "web/index_html.h"
-#include "web/radio_css.h"
-#include "web/favicon_ico.h"
+#include "html/about_html.h"
+#include "html/config_html.h"
+#include "html/index_html.h"
+#include "html/radio_css.h"
+#include "html/favicon_ico.h"
 
 
 //**************************************************************************************************
@@ -336,7 +307,7 @@ void gettime()
       {
         dbgprint ( "Sync TOD" ) ;
       }
-      if ( !getLocalTime ( &timeinfo ) )              // Read from NTP server
+      if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
       {
         dbgprint ( "Failed to obtain time!" ) ;             // Error
         timeinfo.tm_year = 0 ;                              // Set current time to illegal
@@ -370,7 +341,7 @@ inline bool ringspace()
 #if defined ( SRAM )
   return spiram.spaceAvailable() ;         // True if at least one chunk is available
 #else
-  return ( rcount < RINGBFSIZ ) ;   // True if at least one byte of free space is available
+  return ( rcount < RINGBFSIZ ) ;          // True if at least one byte of free space is available
 #endif
 }
 
@@ -383,7 +354,7 @@ inline uint16_t ringavail()
 #if defined ( SRAM )
   return spiram.dataAvailable() ;          // Return number of chunks filled
 #else
-  return rcount ;                   // Return number of bytes available
+  return rcount ;                          // Return number of bytes available
 #endif
 }
 
@@ -409,7 +380,7 @@ void putring ( uint8_t b )                   // Put one byte in the ringbuffer
   {
     rbwindex = 0 ;                           // wrap at the end
   }
-  rcount++ ;                          // Count number of bytes in the
+  rcount++ ;                                 // Count number of bytes in the
 #endif
 }
 
@@ -634,12 +605,12 @@ void IRAM_ATTR timer10sec()
 //******************************************************************************************
 uint8_t anagetsw ( uint16_t v )
 {
-  int      i ;                                    // Loop control
-  int      oldmindist = 1000 ;                    // Detection least difference
-  int      newdist ;                              // New found difference
-  uint8_t  sw = 0 ;                               // Number of switch detected (0 or 1..3)
+  int      i ;                                     // Loop control
+  int      oldmindist = 1000 ;                     // Detection least difference
+  int      newdist ;                               // New found difference
+  uint8_t  sw = 0 ;                                // Number of switch detected (0 or 1..3)
 
-  if ( v > analogrest )                           // Inactive level?
+  if ( v > analogrest )                            // Inactive level?
   {
     for ( i = 0 ; i < NUMANA ; i++ )
     {
@@ -1079,7 +1050,7 @@ void publishIP()
   IPAddress ip ;
   char      ipstr[20] ;                          // Hold IP as string
 
-  if ( ini_block.mqttpubtopic.length() )        // Topic to publish?
+  if ( ini_block.mqttpubtopic.length() )         // Topic to publish?
   {
     ip = WiFi.localIP() ;
     // Publish IP-adress.  qos=1, retain=true
@@ -1167,7 +1138,7 @@ void onMqttUnsubscribe ( uint16_t packetId )
 void onMqttMessage ( char* topic, char* payload, AsyncMqttClientMessageProperties properties,
                      size_t len, size_t index, size_t total )
 {
-  char*  reply ;                                    // Result from analyzeCmd
+  const char*  reply ;                              // Result from analyzeCmd
 
   // Available properties.qos, properties.dup, properties.retain
   if ( len >= sizeof(cmd) )                         // Message may not be too long
@@ -1204,7 +1175,7 @@ void scanserial()
 {
   static String serialcmd ;                      // Command from Serial input
   char          c ;                              // Input character
-  char*         reply ;                          // Reply string froma analyzeCmd
+  const char*   reply = "" ;                     // Reply string from analyzeCmd
   uint16_t      len ;                            // Length of input string
 
   while ( Serial.available() )                   // Any input seen?
@@ -1217,7 +1188,7 @@ void scanserial()
       if ( len )
       {
         strncpy ( cmd, serialcmd.c_str(), sizeof(cmd) ) ;
-        reply = analyzeCmd ( cmd) ;              // Analyze command and handle it
+        reply = analyzeCmd ( cmd ) ;             // Analyze command and handle it
         dbgprint ( reply ) ;                     // Result for debugging
         serialcmd = "" ;                         // Prepare for new command
       }
@@ -1253,7 +1224,22 @@ void mk_lsan()
   anetworks = "|" ;                                    // Initial value
   path = String ( INIFILENAME ) ;                      // Form full path
   inifile = LittleFS.open ( path, "r" ) ;              // Open the file
-  if ( inifile )
+  
+  if ( *fixedwifi )                                    // FIXEDWIFI set and not empty?
+  {
+    line = String ( fixedwifi ) ;
+    inx = line.indexOf ( "/" ) ;                       // Find separator between ssid and password
+    if ( inx > 0 )                                     // Separator found?
+      {
+        ssid = ssid.substring ( 5, inx ) ;             // Line holds SSID now
+        dbgprint ( "Added SSID %s to acceptable networks",
+                  ssid.c_str() ) ;
+        anetworks += ssid ;                            // Add to list
+        anetworks += "|" ;                             // Separator
+        num_an++ ;                                     // Count number oif acceptable networks
+      }
+  }
+  else if ( inifile )
   {
     while ( inifile.available() )
     {
@@ -1470,7 +1456,7 @@ String xmlparse ( String mount )
     tmpstr[0] = '\0' ;                            
     if ( urlfound )
     {
-      sprintf ( tmpstr, "%s:%s/%s_SC",                   // Build URL for ESP-Radio to stream.
+      sprintf ( tmpstr, "%s:%s/%s_SC",                 // Build URL for ESP-Radio to stream.
                         stationServer.c_str(),
                         stationPort.c_str(),
                         stationMount.c_str() ) ;
@@ -1486,126 +1472,6 @@ String xmlparse ( String mount )
   }
   return String ( tmpstr ) ;                           // Return final streaming URL.
 }
-
-
-#if defined ( IR )
-//**************************************************************************************************
-//                                     S C A N I R                                                 *
-//**************************************************************************************************
-// See if IR input is available.  Execute the programmed command.                                  *
-//**************************************************************************************************
-void scanIR()
-{
-  if ( ir_value )                                           // Any input?
-  {
-    if ( ir_value == ir_preset1 )
-    {
-      ini_block.newpreset = 1 ;
-      dbgprint ( "IR code %04X - ir_preset1", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset2 )
-    {
-      ini_block.newpreset = 2 ;
-      dbgprint ( "IR code %04X - ir_preset2", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset3 )
-    {
-      ini_block.newpreset = 3 ;
-      dbgprint ( "IR code %04X - ir_preset3", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset4 )
-    {
-      ini_block.newpreset = 4 ;
-      dbgprint ( "IR code %04X - ir_preset4", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset5 )
-    {
-      ini_block.newpreset = 5 ;
-      dbgprint ( "IR code %04X - ir_preset5", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset6 )
-    {
-      ini_block.newpreset = 6 ;
-      dbgprint ( "IR code %04X - ir_preset3", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset7 )
-    {
-      ini_block.newpreset = 7 ;
-      dbgprint ( "IR code %04X - ir_preset7", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset8 )
-    {
-      ini_block.newpreset = 8 ;
-      dbgprint ( "IR code %04X - ir_preset8", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset9 )
-    {
-      ini_block.newpreset = 9 ;
-      dbgprint ( "IR code %04X - ir_preset9", ir_value ) ;
-    }
-    else if ( ir_value == ir_preset0 )
-    {
-      ini_block.newpreset = 0 ;
-      dbgprint ( "IR code %04X - ir_preset0", ir_value ) ;
-    }
-    else if ( ir_value == ir_stop )
-    {
-      analyzeCmd("stop");
-      dbgprint ( "IR code %04X - ir_stop", ir_value ) ;
-    }
-    else if ( ir_value == ir_play )
-    {
-      analyzeCmd("resume");
-      dbgprint ( "IR code %04X - ir_play", ir_value ) ;
-    }
-    else if ( ir_value == ir_volup )
-    {
-      if ( ini_block.reqvol < 100 )
-      {
-        ini_block.reqvol = vs1053player.getVolume() + 2 ;
-      }
-      else
-      {
-        ini_block.reqvol = 100 ;
-      }
-      dbgprint ( "IR code %04X - ir_volup", ir_value ) ;
-    }
-    else if ( ir_value == ir_voldown )
-    {
-      if ( ini_block.reqvol < 0 )
-      {
-        ini_block.reqvol = 0 ;
-      }
-      else
-      {        
-        ini_block.reqvol = vs1053player.getVolume() - 2 ;
-      }
-      dbgprint ( "IR code %04X - ir_voldown", ir_value ) ;
-    }
-    else if ( ir_value == ir_mute )
-    {
-      muteflag = !muteflag;
-      dbgprint ( "IR code %04X - ir_mute", ir_value ) ;
-    }
-    else if ( ir_value == ir_next )
-    {
-      ini_block.newpreset = currentpreset + 1 ;
-      dbgprint ( "IR code %04X - ir_next", ir_value ) ;
-    }
-    else if ( ir_value == ir_prev )
-    {
-      ini_block.newpreset = currentpreset - 1 ;
-      dbgprint ( "IR code %04X - ir_prev", ir_value ) ;
-    }
-    else
-    {
-      dbgprint ( "IR code %04X received, but not found in the configuration! Timing %d/%d",
-                 ir_value, ir_0, ir_1 ) ;
-    }
-    ir_value = 0 ;                                          // Reset IR code received
-  }
-}
-#endif
 
 
 //******************************************************************************************
@@ -1624,10 +1490,18 @@ void setup()
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
   #if defined ( SRAM )
-    spiram.spiramSetup() ;                                    // Yes, do set-up
+    spiram.spiramSetup() ;                             // Yes, do set-up
     emptyring() ;                                      // Empty the buffer
   #else
+    //ESP.setExternalHeap();                             // Set external memory to use
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
+    dbgprint ( "External buffer: Address %p, free %d\n",
+                                    ringbuf, ESP.getFreeHeap() ) ;
+    //ESP.resetHeap();
+  #endif
+
+  #ifdef FIXEDWIFI                                     // Set fixedwifi if defined
+    fixedwifi = FIXEDWIFI ;
   #endif
   xml.init ( xmlbuffer, sizeof(xmlbuffer),             // Initilize XML stream.
              &XML_callback ) ;
@@ -1671,7 +1545,6 @@ void setup()
   WiFi.disconnect() ;                                  // The router may keep the old connection
   WiFi.mode ( WIFI_STA ) ;                             // This ESP is a station
   wifi_station_set_hostname ( (char*)NAME ) ;
-  SPI.begin() ;                                        // Init SPI bus
   dbgprint ( "Starting ESP Version %s...  Free memory %d",
              VERSION,
              system_get_free_heap_size() ) ;           // Print some memory info
@@ -1819,9 +1692,9 @@ void loop()
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
   #if defined ( SRAM )
-    if ( spiram.spiramdelay != 0 )                            // Delay before reading SPIRAM?
+    if ( spiram.spiramdelay != 0 )                     // Delay before reading SPIRAM?
     {
-      spiram.spiramdelay-- ;                                  // Yes, count down
+      spiram.spiramdelay-- ;                           // Yes, count down
       break ;                                          // and skip handling of data
     }
   #endif
@@ -2544,21 +2417,23 @@ void handleFS ( AsyncWebServerRequest* request )
 // Handling of the various commands from remote webclient, Serial or MQTT.                 *
 // Version for handling string with: <parameter>=<value>                                   *
 //******************************************************************************************
-char* analyzeCmd ( const char* str )
+const char* analyzeCmd ( const char* str )
 {
-  char*  value ;                                 // Points to value after equalsign in command
+  char*        value ;                           // Points to value after equalsign in command
+  const char*  res ;                             // Result of analyzeCmd
 
   value = strstr ( str, "=" ) ;                  // See if command contains a "="
   if ( value )
   {
     *value = '\0' ;                              // Separate command from value
-    value++ ;                                    // Points to value after "="
+    res = analyzeCmd ( str, value + 1 ) ;        // Analyze command and handle it
+    *value = '=' ;                               // Restore equal sign
   }
   else
   {
-    value = (char*) "0" ;                        // No value, assume zero
+    res = analyzeCmd ( str, "0" ) ;              // No value, assume zero
   }
-  return  analyzeCmd ( str, value ) ;            // Analyze command and handle it
+  return res ;
 }
 
 
@@ -2605,8 +2480,7 @@ String chomp ( String str )
 //   station    = <URL>.m3u                 // Select playlist (will not be saved)         *
 //   stop                                   // Stop playing                                *
 //   resume                                 // Resume playing                              *
-//   mute                                   // Mute the music                              *
-//   unmute                                 // Unmute the music                            *
+//   mute                                   // Mute/unmute the music (toggle)              *
 //   wifi_00    = mySSID/mypassword         // Set WiFi SSID and password *)               *
 //   mqttbroker = mybroker.com              // Set MQTT broker to use *)                   *
 //   mqttport   = 1883                      // Set MQTT port to use, default 1883 *)       *
@@ -2615,7 +2489,7 @@ String chomp ( String str )
 //   mqtttopic  = mytopic                   // Set MQTT topic to subscribe to *)           *
 //   mqttpubtopic = mypubtopic              // Set MQTT topic to publish to *)             *
 //   status                                 // Show current URL to play                    *
-//   testfile   = <file on LittleFS>          // Test LittleFS reads for debugging purpose     *
+//   testfile   = <file on LittleFS>        // Test LittleFS reads for debugging purpose   *
 //   test                                   // For test purposes                           *
 //   debug      = 0 or 1                    // Switch debugging on or off                  *
 //   reset                                  // Restart the ESP8266                         *
@@ -2623,7 +2497,7 @@ String chomp ( String str )
 // Commands marked with "*)" are sensible in ini-file only                                 *
 // Note that it is adviced to avoid expressions as the argument for the abs function.      *
 //******************************************************************************************
-char* analyzeCmd ( const char* par, const char* val )
+const char* analyzeCmd ( const char* par, const char* val )
 {
   String             argument ;                       // Argument as string
   String             value ;                          // Value of an argument as a string
@@ -2682,13 +2556,9 @@ char* analyzeCmd ( const char* par, const char* val )
     sprintf ( reply, "Volume is now %d",              // Reply new volume
               ini_block.reqvol ) ;
   }
-  else if ( argument == "mute" )                      // Mute request
+  else if ( argument == "mute" )                      // Mute/unmute request
   {
-    muteflag = true ;                                 // Request volume to zero
-  }
-  else if ( argument == "unmute" )                    // Unmute request?
-  {
-    muteflag = false ;                                // Request normal volume
+    muteflag = !muteflag ;                            // Request volume to zero/normal
   }
   else if ( argument.indexOf ( "preset" ) >= 0 )      // Preset station?
   {

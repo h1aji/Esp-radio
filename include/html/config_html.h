@@ -6,6 +6,7 @@ const char config_html[] PROGMEM = R"=====(
  <head>
   <title>Configuration ESP-radio</title>
   <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+  <link rel="stylesheet" type="text/css" href="radio.css">
   <link rel="Shortcut Icon" type="image/ico" href="favicon.ico">
  </head>
  <body>
@@ -50,12 +51,12 @@ const char config_html[] PROGMEM = R"=====(
         xhr.send() ;
       }
 
-
       function fsav()
       {
         var theUrl = "/?save=0" ;
         var xhr = new XMLHttpRequest() ;
-        xhr.onreadystatechange = function() {
+        xhr.onreadystatechange = function()
+        {
           if ( xhr.readyState == XMLHttpRequest.DONE )
           {
             resultstr.value = xhr.responseText ;
@@ -65,7 +66,6 @@ const char config_html[] PROGMEM = R"=====(
         xhr.setRequestHeader ( "Content-type", "application/x-www-form-urlencoded" ) ;
         xhr.send ( "content=" + inifile.value ) ;
       }
-
 
       function uploadfile ( theForm )
       {
@@ -123,13 +123,6 @@ const char config_html[] PROGMEM = R"=====(
       }
       xhr.open ( "GET", theUrl, false ) ;
       xhr.send() ;
-    </script>
-    <script type="text/javascript">
-      var stylesheet = document.createElement('link') ;
-      stylesheet.href = 'radio.css' ;
-      stylesheet.rel = 'stylesheet' ;
-      stylesheet.type = 'text/css' ;
-      document.getElementsByTagName('head')[0].appendChild(stylesheet) ;
     </script>
   </body>
 </html>
