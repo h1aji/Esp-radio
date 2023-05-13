@@ -24,7 +24,8 @@ extern "C"
   #include <user_interface.h>
 }
 //
-#include "config.h"                                        // Specify configuration
+// Specify configuration
+#include "config.h" 
 //
 #if defined ( SRAM )
   #include "SPIRAM.h"
@@ -34,8 +35,8 @@ extern "C"
   #include "LCD2004.h"
 #else
 // Empty declaration
-#define displayinfo(a,b)
-#define displaytime(a)
+  #define displayinfo(a,b)
+  #define displaytime(a)
 #endif
 //
 #if defined ( IR )

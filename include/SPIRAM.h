@@ -7,12 +7,12 @@
 
 #include "SPI.h"
 
-#define SRAM_CS           15                                // CS pin is connected to GPIO 15
-#define SRAM_FREQ         20e6                              // 23LC1024 supports theorically up to 20MHz
-#define SRAM_SIZE         131072                            // Total size SPI RAM in bytes
-#define CHUNKSIZE         32                                // Chunk size
-#define SRAM_CH_SIZE      4096                              // Total size SPI RAM in chunks
-#define SPIRAMDELAY       100000                            // Delay (in bytes) before reading from SPIRAM
+#define SRAM_CS       15                              // CS pin is connected to GPIO 15
+#define SRAM_FREQ     20e6                            // 23LC1024 supports theorically up to 20MHz
+#define SRAM_SIZE     131072                          // Total size SPI RAM in bytes
+#define CHUNKSIZE     32                              // Chunk size
+#define SRAM_CH_SIZE  4096                            // Total size SPI RAM in chunks
+#define SPIRAMDELAY   100000                          // Delay (in bytes) before reading from SPIRAM
 
 class SPIRAM 
 {
