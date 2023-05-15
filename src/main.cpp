@@ -17,7 +17,7 @@
 #include <ESPAsyncWebServer.h>
 #include <TinyXML.h>
 //
-#include "VS1053.h"
+#include "VS1053.hpp"
 //
 extern "C"
 {
