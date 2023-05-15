@@ -25,14 +25,14 @@ extern "C"
 }
 //
 // Specify configuration
-#include "config.h" 
+#include "config.hpp" 
 //
 #if defined ( SRAM )
-  #include "SPIRAM.h"
+  #include "SPIRAM.hpp"
 #endif
 //
 #if defined ( LCD )
-  #include "LCD2004.h"
+  #include "LCD2004.hpp"
 #else
 // Empty declaration
   #define displayinfo(a,b)
@@ -40,7 +40,7 @@ extern "C"
 #endif
 //
 #if defined ( IR )
-  #include "IR.h"
+  #include "IR.hpp"
 #endif
 //
 //******************************************************************************************

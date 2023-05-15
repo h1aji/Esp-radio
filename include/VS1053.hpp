@@ -4,10 +4,10 @@
 // VS1053 class definition.                                                                *
 //******************************************************************************************
 //
-
+//
 #include "SPI.h"
-#include "vs1053b-patches.h"
-
+#include "vs1053b-patches.hpp"
+//
 // Digital I/O used
 // Pins for VS1053 module
 #define VS1053_CS     2
