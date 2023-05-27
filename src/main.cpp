@@ -1496,7 +1496,7 @@ void setup()
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
   #if defined ( SRAM )
-    spiram.spiramSetup() ;                             // Yes, do set-up
+    spiram.Setup() ;                                   // Yes, do set-up
     emptyring() ;                                      // Empty the buffer
   #else
     //ESP.setExternalHeap();                             // Set external memory to use
