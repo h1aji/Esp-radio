@@ -17,7 +17,7 @@
 #include <ESPAsyncWebServer.h>
 #include <TinyXML.h>
 //
-#include "VS1053.hpp"
+#include "VS1053.h"
 //
 extern "C"
 {
@@ -176,6 +176,11 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 //******************************************************************************************
 // End of global data section.                                                             *
 //******************************************************************************************
+
+
+// The object for the MP3 player
+VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
+
 
 //******************************************************************************************
 // Pages and CSS for the webinterface.                                                     *

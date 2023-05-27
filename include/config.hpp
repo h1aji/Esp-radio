@@ -28,6 +28,12 @@
 #define asw2    2000
 #define asw3    2000
 //
+// Digital I/O used
+// Pins for VS1053 module
+#define VS1053_CS     2
+#define VS1053_DCS    16
+#define VS1053_DREQ   10
+//
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS     20
 //
