@@ -7,7 +7,7 @@
 
 #include "Arduino.h"
 
-#define IR_PIN   0          // Set IR pin to GPIO 0
+#define IR_PIN   2          // Set IR pin to GPIO2
 
 char*  dbgprint ( const char* format, ... ) ;  // Print a formatted debug line
 const  char*  analyzeCmd ( const char* str ) ;

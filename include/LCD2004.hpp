@@ -411,7 +411,7 @@ void displayvolume ( uint8_t vol )
 
   if ( vol != oldvol )                                // Volume changed?
   {
-    dbgprint ( "Update volume to %d", vol ) ;
+    // dbgprint ( "Update volume to %d", vol ) ;
     oldvol = vol ;                                    // Remember for next compare
     pos = map ( vol, 0, 100, 0, dsp_getwidth() ) ;    // Compute end position on TFT
     for ( int i = 0 ; i < dsp_getwidth() ; i++ )      // Set oldstr to dots

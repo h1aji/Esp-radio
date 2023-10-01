@@ -30,7 +30,7 @@
 //
 // Digital I/O used
 // Pins for VS1053 module
-#define VS1053_CS     2
+#define VS1053_CS     0
 #define VS1053_DCS    16
 #define VS1053_DREQ   10
 //

@@ -2559,7 +2559,7 @@ const char* analyzeCmd ( const char* par, const char* val )
     {
       ini_block.reqvol = 100 ;                        // Limit to normal values
     }
-    sprintf ( reply, "Volume is now %d",              // Reply new volume
+    sprintf ( reply, "Volume now is %d",              // Reply new volume
               ini_block.reqvol ) ;
   }
   else if ( argument == "mute" )                      // Mute/unmute request
