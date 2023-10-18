@@ -17,8 +17,6 @@
 #include <ESPAsyncWebServer.h>
 #include <TinyXML.h>
 //
-#include "VS1053.h"
-//
 extern "C"
 {
   #include <user_interface.h>
@@ -26,6 +24,8 @@ extern "C"
 //
 // Specify configuration
 #include "config.hpp" 
+//
+#include "VS1053.hpp"
 //
 #if defined ( SRAM )
   #include "SPIRAM.hpp"
@@ -179,7 +179,7 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 
 
 // The object for the MP3 player
-VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
+VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ, VS1053_RST ) ;
 
 
 //******************************************************************************************
@@ -1558,7 +1558,7 @@ void setup()
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;              // And sketch info
 #if defined ( IR )
-  setupIR();
+  setupIR( IR_PIN ) ;
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
   if ( vs1053player.getChipVersion() == 4 )            // Check if we are using VS1053B chip
