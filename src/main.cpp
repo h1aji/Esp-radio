@@ -17,29 +17,30 @@
 #include <ESPAsyncWebServer.h>
 #include <TinyXML.h>
 //
-#include "VS1053.h"
-//
 extern "C"
 {
   #include <user_interface.h>
 }
 //
-#include "config.h"                                        // Specify configuration
+// Specify configuration
+#include "config.hpp" 
+//
+#include "VS1053.hpp"
 //
 #if defined ( SRAM )
-  #include "SPIRAM.h"
+  #include "SPIRAM.hpp"
 #endif
 //
 #if defined ( LCD )
-  #include "LCD2004.h"
+  #include "LCD2004.hpp"
 #else
 // Empty declaration
-#define displayinfo(a,b)
-#define displaytime(a)
+  #define displayinfo(a,b)
+  #define displaytime(a)
 #endif
 //
 #if defined ( IR )
-  #include "IR.h"
+  #include "IR.hpp"
 #endif
 //
 //******************************************************************************************
@@ -175,6 +176,11 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 //******************************************************************************************
 // End of global data section.                                                             *
 //******************************************************************************************
+
+
+// The object for the MP3 player
+VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ, VS1053_RST ) ;
+
 
 //******************************************************************************************
 // Pages and CSS for the webinterface.                                                     *
@@ -1490,7 +1496,7 @@ void setup()
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
   #if defined ( SRAM )
-    spiram.spiramSetup() ;                             // Yes, do set-up
+    spiram.Setup() ;                                   // Yes, do set-up
     emptyring() ;                                      // Empty the buffer
   #else
     //ESP.setExternalHeap();                             // Set external memory to use
@@ -1552,7 +1558,7 @@ void setup()
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;              // And sketch info
 #if defined ( IR )
-  setupIR();
+  setupIR( IR_PIN ) ;
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
   if ( vs1053player.getChipVersion() == 4 )            // Check if we are using VS1053B chip
@@ -2553,7 +2559,7 @@ const char* analyzeCmd ( const char* par, const char* val )
     {
       ini_block.reqvol = 100 ;                        // Limit to normal values
     }
-    sprintf ( reply, "Volume is now %d",              // Reply new volume
+    sprintf ( reply, "Volume now is %d",              // Reply new volume
               ini_block.reqvol ) ;
   }
   else if ( argument == "mute" )                      // Mute/unmute request

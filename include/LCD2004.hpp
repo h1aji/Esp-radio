@@ -22,8 +22,6 @@
 #include <Wire.h>
 
 #define LCD_I2C_ADDRESS                     0x27            // Adjust for your display
-#define LCD_SDA_PIN                         4
-#define LCD_SCL_PIN                         5
 
 #define ACKENA true                                         // Enable ACK for I2C communication
 
@@ -93,10 +91,10 @@ LCD2004* lcd = NULL ;
 bool dsp_begin()
 {
   dbgprint ( "Init I2C LCD2004: SDA pin %d, SCL pin %d",
-                                LCD_SDA_PIN, LCD_SCL_PIN ) ;
-  if ( ( LCD_SDA_PIN == 4 ) && ( LCD_SCL_PIN == 5 ) )       // Make sure correct pins are used
+                                PIN_WIRE_SDA, PIN_WIRE_SCL ) ;
+  if ( ( PIN_WIRE_SDA == 4 ) && ( PIN_WIRE_SCL == 5 ) )       // Make sure correct pins are used
   {
-    lcd = new LCD2004 ( LCD_SDA_PIN, LCD_SCL_PIN ) ;        // Create an instance for LCD
+    lcd = new LCD2004 ( PIN_WIRE_SDA, PIN_WIRE_SCL ) ;        // Create an instance for LCD
   }
   else
   {
@@ -413,7 +411,7 @@ void displayvolume ( uint8_t vol )
 
   if ( vol != oldvol )                                // Volume changed?
   {
-    dbgprint ( "Update volume to %d", vol ) ;
+    // dbgprint ( "Update volume to %d", vol ) ;
     oldvol = vol ;                                    // Remember for next compare
     pos = map ( vol, 0, 100, 0, dsp_getwidth() ) ;    // Compute end position on TFT
     for ( int i = 0 ; i < dsp_getwidth() ; i++ )      // Set oldstr to dots

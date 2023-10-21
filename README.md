@@ -33,18 +33,15 @@ This fork is optimised for Platformio and replaced ILI9163C display with LCD2004
 |-----------|----------|------------|------------|------------
 |  GPIO04   |          |            |            |    SDA    |
 |  GPIO05   |          |            |            |    SCL    |
-|  GPIO00   |          |            |    OUT     |           |
+|  GPIO00   |   CS     |            |            |           |
 |  GPIO14   |   SCK    |    SCK     |            |           |
 |  GPIO12   |   MISO   |  SO/SIO1   |            |           |
 |  GPIO13   |   MOSI   |  SI/SIO0   |            |           |
 |  GPIO16   |   DCS    |            |            |           |
-|  GPIO02   |   CS     |            |            |           |
+|  GPIO02   |          |            |    OUT     |           |
 |  GPIO15   |          |     CS     |            |           |
-|  GPIO10   |   DREQ   |            |            |           |
-
-
-### Schematic
-![diagram](./doc/schema.png)
+|  GPIO09   |   DREQ   |            |            |           |
+|  GPIO10   |   RST    |            |            |           |
 
 
 ### Photos

@@ -18,16 +18,6 @@
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
 #define RINGBFSIZ         16000
 //
-// Definitions for 3 control switches on analog input
-// You can test the analog input values by holding down the switch and select /?analog=1
-// in the web interface. See schematics in the documentation.
-// Switches are programmed as "Goto station 1", "Next station" and "Previous station" respectively.
-// Set these values to 2000 if not used or tie analog input to ground.
-#define NUMANA  3
-#define asw1    2000
-#define asw2    2000
-#define asw3    2000
-//
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS     20
 //
@@ -39,3 +29,23 @@
 //
 // Enable support for Infra-red receiver by uncommenting the next line
 #define IR
+//
+// Set IR pin to GPIO02
+#define IR_PIN        2
+//
+// Digital I/O used
+// Pins for VS1053 module
+#define VS1053_CS     0
+#define VS1053_DCS    16
+#define VS1053_DREQ   9
+#define VS1053_RST    10
+//
+// Definitions for 3 control switches on analog input
+// You can test the analog input values by holding down the switch and select /?analog=1
+// in the web interface. See schematics in the documentation.
+// Switches are programmed as "Goto station 1", "Next station" and "Previous station" respectively.
+// Set these values to 2000 if not used or tie analog input to ground.
+#define NUMANA  3
+#define asw1    2000
+#define asw2    2000
+#define asw3    2000

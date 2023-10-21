@@ -7,7 +7,6 @@
 
 #include "Arduino.h"
 
-#define IR_PIN   0          // Set IR pin to GPIO 0
 
 char*  dbgprint ( const char* format, ... ) ;  // Print a formatted debug line
 const  char*  analyzeCmd ( const char* str ) ;
@@ -220,9 +219,9 @@ void scanIR()
 //**************************************************************************************************
 // Setup IR input.                                                                                 *
 //**************************************************************************************************
-void setupIR()
+void setupIR(uint8_t ir_pin)
 {
-  dbgprint ( "Enable pin %d for IR", IR_PIN ) ;
-  pinMode ( IR_PIN, INPUT ) ;                        // Pin for IR receiver VS1838B
-  attachInterrupt ( IR_PIN, isr_IR, CHANGE ) ;       // Interrupts will be handled by isr_IR
+  dbgprint ( "Enable pin %d for IR", ir_pin ) ;
+  pinMode ( ir_pin, INPUT ) ;                        // Pin for IR receiver VS1838B
+  attachInterrupt ( ir_pin, isr_IR, CHANGE ) ;       // Interrupts will be handled by isr_IR
 }

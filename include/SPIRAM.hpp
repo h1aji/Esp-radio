@@ -7,12 +7,12 @@
 
 #include "SPI.h"
 
-#define SRAM_CS           15                                // CS pin is connected to GPIO 15
-#define SRAM_FREQ         20e6                              // 23LC1024 supports theorically up to 20MHz
-#define SRAM_SIZE         131072                            // Total size SPI RAM in bytes
-#define CHUNKSIZE         32                                // Chunk size
-#define SRAM_CH_SIZE      4096                              // Total size SPI RAM in chunks
-#define SPIRAMDELAY       100000                            // Delay (in bytes) before reading from SPIRAM
+#define SRAM_CS       15                              // CS pin is connected to GPIO 15
+#define SRAM_FREQ     20000000                        // 23LC1024 supports theorically up to 20MHz
+#define SRAM_SIZE     131072                          // Total size SPI RAM in bytes
+#define CHUNKSIZE     32                              // Chunk size
+#define SRAM_CH_SIZE  4096                            // Total size SPI RAM in chunks
+#define SPIRAMDELAY   100000                          // Delay (in bytes) before reading from SPIRAM
 
 class SPIRAM 
 {
@@ -22,7 +22,7 @@ class SPIRAM
     uint8_t           prcwinx ;                             // Index in pwchunk (see putring)
     uint8_t           prcrinx ;                             // Index in prchunk (see getring)
     int32_t           spiramdelay = SPIRAMDELAY ;           // Delay before reading from SPIRAM
-    void              spiramSetup() ;
+    void              Setup() ;
     void              bufferReset() ;
     bool              spaceAvailable() ;
     uint16_t          dataAvailable() ;
@@ -186,7 +186,7 @@ SPIRAM::SPIRAM ( uint8_t cs, uint8_t clockspeedhz )
 //******************************************************************************************
 //                                S P I R A M S E T U P                                    *
 //******************************************************************************************
-void SPIRAM::spiramSetup()
+void SPIRAM::Setup()
 {
   SPI.begin();
   pinMode ( Cs, OUTPUT ) ;

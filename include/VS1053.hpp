@@ -8,12 +8,6 @@
 #include "SPI.h"
 #include "vs1053b-patches.h"
 
-// Digital I/O used
-// Pins for VS1053 module
-#define VS1053_CS     2
-#define VS1053_DCS    16
-#define VS1053_DREQ   10
-
 char*       dbgprint ( const char* format, ... ) ; // Print a formatted debug line
 
 class VS1053
@@ -22,6 +16,7 @@ class VS1053
     uint8_t       cs_pin ;                        // Pin where CS line is connected
     uint8_t       dcs_pin ;                       // Pin where DCS line is connected
     uint8_t       dreq_pin ;                      // Pin where DREQ line is connected
+    uint8_t       rst_pin ;                       // Pin where RST line is connected
     uint8_t       curvol ;                        // Current volume setting 0..100%
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
@@ -89,7 +84,7 @@ class VS1053
 
   public:
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
-    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) ;
+    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t _rst_pin ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
     // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
@@ -120,11 +115,8 @@ class VS1053
 
 } ;
 
-// The object for the MP3 player
-VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
-
-VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) :
-  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin)
+VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t _rst_pin ) :
+  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin), rst_pin(_rst_pin)
 {
 }
 
@@ -258,14 +250,12 @@ void VS1053::begin()
   digitalWrite ( cs_pin,    HIGH ) ;
   delay ( 100 ) ;
   dbgprint ( "Reset VS1053..." ) ;
-  digitalWrite ( dcs_pin,   LOW ) ;                     // Low & Low will bring reset pin low
-  digitalWrite ( cs_pin,    LOW ) ;
+  digitalWrite ( rst_pin,   LOW ) ;                     // LOW will bring reset pin low
   delay ( 2000 ) ;
   dbgprint ( "End reset VS1053..." ) ;
-  digitalWrite ( dcs_pin,   HIGH ) ;                    // Back to normal again
-  digitalWrite ( cs_pin,    HIGH ) ;
+  digitalWrite ( rst_pin,   HIGH ) ;                    // Back to normal again
   delay ( 500 ) ;
-  SPI.begin() ;                                        // Init SPI bus
+  SPI.begin() ;                                         // Init SPI bus
   // Init SPI in slow mode ( 0.2 MHz )
   VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
   //printDetails ( "Right after reset/startup" ) ;
@@ -447,4 +437,4 @@ void VS1053::loadUserCode ( const unsigned short* plugin, unsigned short plugin_
 void VS1053::loadDefaultVs1053Patches()
 {
    loadUserCode ( PATCHES, PATCHES_SIZE ) ;              // Load the latest generic firmware patch
-};
+}
