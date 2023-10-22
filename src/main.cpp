@@ -23,13 +23,9 @@ extern "C"
 }
 //
 // Specify configuration
-#include "config.hpp" 
+#include "config.hpp"
 //
 #include "VS1053.hpp"
-//
-#if defined ( SRAM )
-  #include "SPIRAM.hpp"
-#endif
 //
 #if defined ( LCD )
   #include "LCD2004.hpp"
@@ -145,11 +141,9 @@ bool             localfile = false ;                       // Play from local mp
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
 uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
-#if not defined ( SRAM )
-  uint8_t       *ringbuf ;                                 // Ringbuffer for VS1053
-  uint16_t       rbwindex = 0 ;                            // Fill pointer in ringbuffer
-  uint16_t       rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
-#endif
+uint8_t         *ringbuf ;                                 // Ringbuffer for VS1053
+uint16_t         rbwindex = 0 ;                            // Fill pointer in ringbuffer
+uint16_t         rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
 bool             scrollflag = false ;                      // Request to scroll LCD
 struct tm        timeinfo ;                                // Will be filled by NTP server
 char             timetxt[9] ;                              // Converted timeinfo
@@ -292,9 +286,10 @@ String utf8ascii ( const char* s )
 //**************************************************************************************************
 void gettime()
 {
+#if defined ( LCD )
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
-  {
+
     if ( timeinfo.tm_year )                                 // Legal time found?
     {
       sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
@@ -309,10 +304,7 @@ void gettime()
       {
         dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
       }
-      else
-      {
-        dbgprint ( "Sync TOD" ) ;
-      }
+      dbgprint ( "Sync TOD" ) ;
       if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
       {
         dbgprint ( "Failed to obtain time!" ) ;             // Error
@@ -332,7 +324,7 @@ void gettime()
         dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
       }
     }
-  }
+#endif
 }
 
 
@@ -344,11 +336,7 @@ void gettime()
 //******************************************************************************************
 inline bool ringspace()
 {
-#if defined ( SRAM )
-  return spiram.spaceAvailable() ;         // True if at least one chunk is available
-#else
   return ( rcount < RINGBFSIZ ) ;          // True if at least one byte of free space is available
-#endif
 }
 
 
@@ -357,11 +345,7 @@ inline bool ringspace()
 //******************************************************************************************
 inline uint16_t ringavail()
 {
-#if defined ( SRAM )
-  return spiram.dataAvailable() ;          // Return number of chunks filled
-#else
   return rcount ;                          // Return number of bytes available
-#endif
 }
 
 
@@ -372,22 +356,12 @@ inline uint16_t ringavail()
 //******************************************************************************************
 void putring ( uint8_t b )                   // Put one byte in the ringbuffer
 {
-#if defined ( SRAM )
-  static uint8_t pwchunk[32] ;               // Buffer for one chunk
-  pwchunk[spiram.prcwinx++] = b ;            // Store in local chunk
-  if ( spiram.prcwinx == sizeof(pwchunk) )   // Chunk full?
-  {
-    spiram.bufferWrite ( pwchunk ) ;         // Yes, store in SPI RAM
-    spiram.prcwinx = 0 ;                     // Index to begin of chunk
-  }
-#else
   *(ringbuf + rbwindex) = b ;                // Put byte in ringbuffer
   if ( ++rbwindex == RINGBFSIZ )             // Increment pointer and
   {
     rbwindex = 0 ;                           // wrap at the end
   }
   rcount++ ;                                 // Count number of bytes in the
-#endif
 }
 
 
@@ -398,22 +372,12 @@ void putring ( uint8_t b )                   // Put one byte in the ringbuffer
 //******************************************************************************************
 uint8_t getring()
 {
-#if defined ( SRAM )
-  static uint8_t prchunk[32] ;                 // Buffer for one chunk
-  if ( spiram.prcrinx >= sizeof(prchunk) )     // End of buffer reached?
-  {
-    spiram.prcrinx = 0 ;                       // Yes, reset index to begin of buffer
-    spiram.bufferRead ( prchunk ) ;            // And read new buffer
-  }
-  return ( prchunk[spiram.prcrinx++] ) ;
-#else
   if ( ++rbrindex == RINGBFSIZ )               // Increment pointer and
   {
     rbrindex = 0 ;                             // wrap at the end
   }
   rcount-- ;                                   // Count is now one less
   return *(ringbuf + rbrindex) ;               // Return the oldest byte
-#endif
 }
 
 
@@ -422,14 +386,9 @@ uint8_t getring()
 //******************************************************************************************
 void emptyring()
 {
-#if defined ( SRAM )
-  spiram.prcwinx = 0 ;
-  spiram.prcrinx = 32 ;                        // Set buffer to empty
-#else
   rbwindex = 0 ;                               // Reset ringbuffer administration
   rbrindex = RINGBFSIZ - 1 ;
   rcount = 0 ;
-#endif
 }
 
 
@@ -460,7 +419,7 @@ char* dbgprint ( const char* format, ... )
 //                             G E T E N C R Y P T I O N T Y P E                           *
 //******************************************************************************************
 // Read the encryption type of the network and return as a 4 byte name                     *
-//*********************4********************************************************************
+//******************************************************************************************
 const char* getEncryptionType ( int thisType )
 {
   switch (thisType)
@@ -931,8 +890,8 @@ bool connecttofile()
 bool connectwifi()
 {
   char*  pfs ;                                         // Pointer to formatted string
-  WiFi.disconnect() ;                                  // After restart the router could
-  WiFi.softAPdisconnect(true) ;                        // still keep the old connection
+  WiFi.disconnect ( true ) ;                           // After restart the router could
+  WiFi.softAPdisconnect ( true ) ;                     // still keep the old connection
   WiFi.begin ( ini_block.ssid.c_str(),
                ini_block.passwd.c_str() ) ;            // Connect to selected SSID
   dbgprint ( "Try WiFi %s", ini_block.ssid.c_str() ) ; // Message to show during WiFi connect
@@ -942,7 +901,20 @@ bool connectwifi()
   if (  WiFi.waitForConnectResult() != WL_CONNECTED )  // Try to connect
   {
     dbgprint ( "WiFi Failed!  Trying to setup AP with name %s and password %s.", NAME, NAME ) ;
-    WiFi.softAP ( NAME, NAME ) ;                       // This ESP will be an AP
+
+    WiFi.disconnect ( true ) ;                         // After restart the router could
+    WiFi.softAPdisconnect ( true ) ;                   // still keep the old connection
+
+    boolean wifiap = WiFi.softAP(NAME,NAME);
+    if ( wifiap == true )
+    {
+      dbgprint ( "WIFI Access Point is Ready" );
+    }
+    else
+    {
+      dbgprint ( "WIFI Access Point Failed to Setup!" );
+    }
+
     delay ( 5000 ) ;
     pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Address if AP
     displayinfo ( "*AP mode activated*", 2 ) ;
@@ -1495,15 +1467,17 @@ void setup()
   Serial.begin ( 115200 ) ;                            // For debug
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
+  
   #if defined ( SRAM )
-    spiram.Setup() ;                                   // Yes, do set-up
-    emptyring() ;                                      // Empty the buffer
-  #else
-    //ESP.setExternalHeap();                             // Set external memory to use
+    ESP.setExternalHeap();                             // Set external memory to use
+  #endif
+
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
-    dbgprint ( "External buffer: Address %p, free %d\n",
-                                    ringbuf, ESP.getFreeHeap() ) ;
-    //ESP.resetHeap();
+
+  #if defined ( SRAM )
+    dbgprint ( "External buffer: Address %p, free %d\n", 
+                    ringbuf, ESP.getFreeHeap() ) ;
+    ESP.resetHeap();                                   // Reset Heap for external memory
   #endif
 
   #ifdef FIXEDWIFI                                     // Set fixedwifi if defined
@@ -1697,13 +1671,6 @@ void loop()
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
-  #if defined ( SRAM )
-    if ( spiram.spiramdelay != 0 )                     // Delay before reading SPIRAM?
-    {
-      spiram.spiramdelay-- ;                           // Yes, count down
-      break ;                                          // and skip handling of data
-    }
-  #endif
     handlebyte_ch ( getring() ) ;                      // Yes, handle it
   }
   yield() ;
@@ -2125,10 +2092,6 @@ void handlebyte ( uint8_t b, bool force )
                       ", metaint is %d",               // and metaint
                       mbitrate, metaint ) ;
           datamode = DATA ;                            // Expecting data now
-        #if defined ( SRAM )
-          spiram.spiramdelay = SPIRAMDELAY ;           // Start delay
-        #endif
-          //emptyring() ;                              // Empty SPIRAM buffer (not sure about this)
           datacount = metaint ;                        // Number of bytes before first metadata
           bufcnt = 0 ;                                 // Reset buffer count
           vs1053player.switchToMp3Mode() ;
@@ -2652,9 +2615,6 @@ const char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-  #if defined ( SRAM )                                // SPI RAM used?
-    rcount = spiram.dataAvailable() ;                 // Yes, get free space
-  #endif
     if ( mp3client )
     {
       sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
