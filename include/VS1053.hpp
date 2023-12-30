@@ -16,7 +16,6 @@ class VS1053
     uint8_t       cs_pin ;                        // Pin where CS line is connected
     uint8_t       dcs_pin ;                       // Pin where DCS line is connected
     uint8_t       dreq_pin ;                      // Pin where DREQ line is connected
-    uint8_t       rst_pin ;                       // Pin where RST line is connected
     uint8_t       curvol ;                        // Current volume setting 0..100%
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
@@ -84,7 +83,7 @@ class VS1053
 
   public:
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
-    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t _rst_pin ) ;
+    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
     // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
@@ -115,8 +114,8 @@ class VS1053
 
 } ;
 
-VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t _rst_pin ) :
-  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin), rst_pin(_rst_pin)
+VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) :
+  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin)
 {
 }
 
@@ -250,10 +249,12 @@ void VS1053::begin()
   digitalWrite ( cs_pin,    HIGH ) ;
   delay ( 100 ) ;
   dbgprint ( "Reset VS1053..." ) ;
-  digitalWrite ( rst_pin,   LOW ) ;                     // LOW will bring reset pin low
+  digitalWrite ( dcs_pin, LOW ) ;                       // Low & Low will bring reset pin low
+  digitalWrite ( cs_pin, LOW ) ;
   delay ( 2000 ) ;
   dbgprint ( "End reset VS1053..." ) ;
-  digitalWrite ( rst_pin,   HIGH ) ;                    // Back to normal again
+  digitalWrite ( dcs_pin, HIGH ) ;                      // Back to normal again
+  digitalWrite ( cs_pin, HIGH ) ;
   delay ( 500 ) ;
   SPI.begin() ;                                         // Init SPI bus
   // Init SPI in slow mode ( 0.2 MHz )

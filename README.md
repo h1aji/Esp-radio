@@ -40,9 +40,13 @@ This fork is optimised for Platformio and replaced ILI9163C display with LCD2004
 |  GPIO16   |   DCS    |            |            |           |
 |  GPIO02   |          |            |    OUT     |           |
 |  GPIO15   |          |     CS     |            |           |
-|  GPIO09   |   DREQ   |            |            |           |
-|  GPIO10   |   RST    |            |            |           |
+|  GPIO10   |   DREQ   |            |            |           |
+|  **       |   RST    |            |            |           |
 
+## Reset circuit
+** RST circuit for VS1053 is made of 2 signal diodes 1N4148 and 1K Ohm resistor connected to the ground
+
+![reset circuit](./doc/reset.png)
 
 ### Photos
 <details>

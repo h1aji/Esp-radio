@@ -19,7 +19,7 @@
 #define MAXMQTTCONNECTS     20
 //
 // Use 23LC1024 SPI RAM as ringbuffer
-#define SRAM
+//#define SRAM
 #if defined ( SRAM )
   // Full size of 23LC1024 chip is 131072 bytes
   #define RINGBFSIZ         60000
@@ -41,8 +41,7 @@
 // Pins for VS1053 module
 #define VS1053_CS     0
 #define VS1053_DCS    16
-#define VS1053_DREQ   9
-#define VS1053_RST    10
+#define VS1053_DREQ   10
 //
 // Definitions for 3 control switches on analog input
 // You can test the analog input values by holding down the switch and select /?analog=1
