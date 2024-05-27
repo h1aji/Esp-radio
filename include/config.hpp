@@ -19,14 +19,10 @@
 #define MAXMQTTCONNECTS     20
 //
 // Use 23LC1024 SPI RAM as ringbuffer
-//#define SRAM
-#if defined ( SRAM )
-  // Full size of 23LC1024 chip is 131072 bytes
-  #define RINGBFSIZ         60000
-#else
-  // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-  #define RINGBFSIZ         20000
-#endif
+#define SRAM
+//
+// Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
+#define RINGBFSIZ         20000
 //
 // Define LCD if you are using LCD 2004
 #define LCD

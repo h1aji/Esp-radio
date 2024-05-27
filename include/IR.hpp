@@ -221,7 +221,7 @@ void scanIR()
 //**************************************************************************************************
 void setupIR ( uint8_t ir_pin )
 {
-  dbgprint ( "Enable pin %d for IR", ir_pin ) ;
+  dbgprint ( "Enable GPIO %d for IR", ir_pin ) ;
   pinMode ( ir_pin, INPUT ) ;                        // Pin for IR receiver TSOP4838
   attachInterrupt ( ir_pin, isr_IR, CHANGE ) ;       // Interrupts will be handled by isr_IR
 }
