@@ -7,8 +7,6 @@
 
 #include "SPI.h"
 
-#define min(a,b) ((a)<(b)?(a):(b))
-
 #define SRAM_CS       15                              // CS pin is connected to GPIO 15
 #define SRAM_FREQ     20000000                        // 23LC1024 supports theorically up to 20MHz
 #define SRAM_SIZE     131072                          // Total size SPI RAM in bytes
@@ -64,10 +62,10 @@ void SPIRAM::spiramWrite(uint32_t addr, uint8_t *buff, uint32_t size) {
 
     digitalWrite(SRAM_CS, HIGH);
 
-    if (i % 64 == 0) yield(); // Yield to reset the watchdog every 64 iterations
+    if (i % 32 == 0) yield(); // Yield to reset the watchdog every 32 iterations
   }
 
-  SPI.endTransaction(); // End the SPI transaction once
+  SPI.endTransaction();
 }
 
 void SPIRAM::spiramRead(uint32_t addr, uint8_t *buff, uint32_t size) {
@@ -83,9 +81,9 @@ void SPIRAM::spiramRead(uint32_t addr, uint8_t *buff, uint32_t size) {
 
     digitalWrite(SRAM_CS, HIGH);
 
-    if (i % 64 == 0) yield(); // Yield to reset the watchdog every 64 iterations
+    if (i % 32 == 0) yield(); // Yield to reset the watchdog every 32 iterations
   }
-  SPI.endTransaction(); // End the SPI transaction once
+  SPI.endTransaction();
 }
 
 
@@ -155,7 +153,7 @@ void SPIRAM::bufferRead ( uint8_t *b )
 //******************************************************************************************
 void SPIRAM::bufferReset()
 {
-  readinx = 0;                                        // Reset ringbuffer administration
+  readinx = 0;                                         // Reset ringbuffer administration
   writeinx = 0;
   chcount = 0;
 }
