@@ -141,7 +141,6 @@ String           testfilename = "" ;                       // File to test (Litt
 uint16_t         mqttcount = 0 ;                           // Counter MAXMQTTCONNECTS
 int8_t           playlist_num = 0 ;                        // Nonzero for selection from playlist
 File             mp3file ;                                 // File containing mp3 on LittleFS
-bool             localfile = false ;                       // Play from local mp3-file or not
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
 uint32_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
@@ -891,32 +890,6 @@ bool connecttohost()
   }
   dbgprint ( "Request %s failed!", host.c_str() ) ;
   return false ;
-}
-
-
-//******************************************************************************************
-//                               C O N N E C T T O F I L E                                 *
-//******************************************************************************************
-// Open the local mp3-file.                                                                *
-//******************************************************************************************
-bool connecttofile()
-{
-  String path ;                                           // Full file spec
-  char*  p ;                                              // Pointer to filename
-  displayinfo ( "**** MP3 Player ****", 1 ) ;
-  path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
-  mp3file = LittleFS.open ( path, "r" ) ;                 // Open the file
-  if ( !mp3file )
-  {
-    dbgprint ( "Error opening file %s", path.c_str() ) ;  // No luck
-    return false ;
-  }
-  p = (char*)path.c_str() + 1 ;                           // Point to filename
-  showstreamtitle ( p, true ) ;                           // Show the filename as title
-  displayinfo ( "Playing from local file", 2 ) ;          // Show Source at position 60
-  icyname = "" ;                                          // No icy name yet
-  chunked = false ;                                       // File not chunked
-  return true ;
 }
 
 
@@ -1679,31 +1652,15 @@ void loop()
                     PLAYLISTHEADER |
                     PLAYLISTDATA ) )
   {
-    if ( localfile )
+    maxfilechunk = mp3client->available() ;            // Bytes available from mp3 server
+    if ( maxfilechunk > 1024 )                         // Reduce byte count for this loop()
     {
-      maxfilechunk = mp3file.available() ;             // Bytes left in file
-      if ( maxfilechunk > 1024 )                       // Reduce byte count for this loop()
-      {
-        maxfilechunk = 1024 ;
-      }
-      while ( ringspace() && maxfilechunk-- )
-      {
-        putring ( mp3file.read() ) ;                   // Yes, store one byte in ringbuffer
-        yield() ;
-      }
+      maxfilechunk = 1024 ;
     }
-    else
+    while ( ringspace() && maxfilechunk-- )
     {
-      maxfilechunk = mp3client->available() ;          // Bytes available from mp3 server
-      if ( maxfilechunk > 1024 )                       // Reduce byte count for this loop()
-      {
-        maxfilechunk = 1024 ;
-      }
-      while ( ringspace() && maxfilechunk-- )
-      {
-        putring ( mp3client->read() ) ;                // Yes, store one byte in ringbuffer
-        yield() ;
-      }
+      putring ( mp3client->read() ) ;                  // Yes, store one byte in ringbuffer
+      yield() ;
     }
     yield() ;
   }
@@ -1722,33 +1679,13 @@ void loop()
   if ( datamode == STOPREQD )                          // STOP requested?
   {
     dbgprint ( "STOP requested" ) ;
-    if ( localfile )
-    {
-      mp3file.close() ;
-    }
-    else
-    {
-      stop_mp3client() ;                               // Disconnect if still connected
-    }
+    stop_mp3client() ;                                 // Disconnect if still connected
     handlebyte_ch ( 0, true ) ;                        // Force flush of buffer
     vs1053player.setVolume ( 0 ) ;                     // Mute
     vs1053player.stopSong() ;                          // Stop playing
     emptyring() ;                                      // Empty the ringbuffer
     datamode = STOPPED ;                               // Yes, state becomes STOPPED
     delay ( 500 ) ;
-  }
-  if ( localfile )
-  {
-    if ( datamode & ( INIT | HEADER | DATA |           // Test op playing
-                      METADATA | PLAYLISTINIT |
-                      PLAYLISTHEADER |
-                      PLAYLISTDATA ) )
-    {
-      if ( ( mp3file.available() == 0 ) && ( ringavail() == 0 ) )
-      {
-        datamode = STOPREQD ;                          // End of local mp3-file detected
-      }
-    }
   }
   if ( ini_block.newpreset != currentpreset )          // New station or next from playlist requested?
   {
@@ -1785,24 +1722,13 @@ void loop()
   {
     hostreq = false ;
     currentpreset = ini_block.newpreset ;              // Remember current preset
-    
-    localfile = host.startsWith ( "localhost/" ) ;     // Find out if this URL is on localhost
-    if ( localfile )                                   // Play file from localhost?
+
+    if ( host.startsWith ( "ihr/" ) )                  // iHeartRadio station requested?
     {
-      if ( connecttofile() )                           // Yes, open mp3-file
-      {
-        datamode = DATA ;                              // Start in DATA mode
-      }
+      host = host.substring ( 4 ) ;                    // Yes, remove "ihr/"
+      host = xmlparse ( host ) ;                       // Parse the xml to get the host
     }
-    else
-    {
-      if ( host.startsWith ( "ihr/" ) )                // iHeartRadio station requested?
-      {
-        host = host.substring ( 4 ) ;                  // Yes, remove "ihr/"
-        host = xmlparse ( host ) ;                     // Parse the xml to get the host
-      }
-      connecttohost() ;                                // Switch to new host
-    }
+    connecttohost() ;                                  // Switch to new host
   }
   if ( xmlreq )                                        // Directly xml requested?
   {
@@ -2074,8 +2000,8 @@ void handlebyte ( uint8_t b, bool force )
       LFcount++ ;                                      // Count linefeeds
       if ( chkhdrline ( metaline.c_str() ) )           // Reasonable input?
       {
-        lcml = metaline ;                              // Use lower case for compare
-        lcml.toLowerCase() ;
+        lcml = metaline ;
+        lcml.toLowerCase() ;                           // Use lower case for compare
         dbgprint ( metaline.c_str() ) ;                // Yes, Show it
         if ( lcml.startsWith ( "location: " ) )        // Redirection?
         {
@@ -2085,7 +2011,7 @@ void handlebyte ( uint8_t b, bool force )
             host = metaline.substring ( 17 ) ;         // Yes, get new URL
             hostreq = true ;
           }
-          else if ( lcml.indexOf ( "https://" ) )      // Redirection with ttps://?
+          else if ( lcml.indexOf ( "https://" ) )      // Redirection with https://?
           {
             host = metaline.substring ( 18 ) ;         // Yes, get new URL
             hostreq = true ;
@@ -2119,8 +2045,7 @@ void handlebyte ( uint8_t b, bool force )
         }
         else if ( lcml.startsWith ( "transfer-encoding:" ) )
         {
-          // Station provides chunked transfer
-          if ( lcml.endsWith ( "chunked" ) )
+          if ( lcml.endsWith ( "chunked" ) )           // Station provides chunked transfer
           {
             chunked = true ;                           // Remember chunked transfer mode
             chunkcount = 0 ;                           // Expect chunkcount in DATA
