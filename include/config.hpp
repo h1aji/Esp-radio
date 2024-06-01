@@ -22,7 +22,7 @@
 #define SRAM
 //
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-#define RINGBFSIZ         20000
+#define RINGBFSIZ         16000
 //
 // Define LCD if you are using LCD 2004
 #define LCD

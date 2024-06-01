@@ -916,17 +916,18 @@ bool connectwifi()
 
   //wifi_fpm_auto_sleep_set_in_null_mode ( NULL_MODE ) ; // Disable auto sleep mode
 
-  if ( WiFi.waitForConnectResult() != WL_CONNECTED )  // Try to connect
+  if ( WiFi.waitForConnectResult() != WL_CONNECTED )   // Try to connect
   {
     dbgprint ( "WiFi Failed! Trying to setup AP with name %s", NAME ) ;
+    boolean res = WiFi.softAP ( NAME, NULL ) ;         // This ESP will be an AP
 
-    if ( ! WiFi.softAP ( NAME, NULL ) )   // This ESP will be an AP
+    if ( res == true )
     {
-      dbgprint ( "WIFI Access Point Failed to Setup!" );
+      dbgprint ( "WIFI Access Point is Ready" );
     }
     else
     {
-      dbgprint ( "WIFI Access Point is Ready" );
+      dbgprint ( "WIFI Access Point Failed to Setup!" );
     }
 
     delay ( 5000 ) ;
