@@ -27,16 +27,16 @@ extern "C"
 //
 #include "VS1053.hpp"
 //
+#if defined ( SRAM )
+  #include "SPIRAM.hpp"
+#endif
+//
 #if defined ( LCD )
   #include "LCD2004.hpp"
 #else
 // Empty declaration
   #define displayinfo(a,b)
   #define displaytime(a)
-#endif
-//
-#if defined ( SRAM )
-  #include "SPIRAM.hpp"
 #endif
 //
 #if defined ( IR )
@@ -143,7 +143,7 @@ int8_t           playlist_num = 0 ;                        // Nonzero for select
 File             mp3file ;                                 // File containing mp3 on LittleFS
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
-uint32_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
+uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
 #if not defined ( SRAM )
   uint8_t       *ringbuf ;                                 // Ringbuffer for VS1053
   uint16_t       rbwindex = 0 ;                            // Fill pointer in ringbuffer
