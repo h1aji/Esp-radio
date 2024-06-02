@@ -23,7 +23,7 @@ extern "C"
 }
 //
 // Specify configuration
-#include "config.hpp" 
+#include "config.hpp"
 //
 #include "VS1053.hpp"
 //
@@ -141,7 +141,6 @@ String           testfilename = "" ;                       // File to test (Litt
 uint16_t         mqttcount = 0 ;                           // Counter MAXMQTTCONNECTS
 int8_t           playlist_num = 0 ;                        // Nonzero for selection from playlist
 File             mp3file ;                                 // File containing mp3 on LittleFS
-bool             localfile = false ;                       // Play from local mp3-file or not
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
 uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
@@ -292,9 +291,10 @@ String utf8ascii ( const char* s )
 //**************************************************************************************************
 void gettime()
 {
+#if defined ( LCD )
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
-  {
+
     if ( timeinfo.tm_year )                                 // Legal time found?
     {
       sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
@@ -309,10 +309,7 @@ void gettime()
       {
         dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
       }
-      else
-      {
-        dbgprint ( "Sync TOD" ) ;
-      }
+      dbgprint ( "Sync TOD" ) ;
       if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
       {
         dbgprint ( "Failed to obtain time!" ) ;             // Error
@@ -332,7 +329,7 @@ void gettime()
         dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
       }
     }
-  }
+#endif
 }
 
 
@@ -460,7 +457,7 @@ char* dbgprint ( const char* format, ... )
 //                             G E T E N C R Y P T I O N T Y P E                           *
 //******************************************************************************************
 // Read the encryption type of the network and return as a 4 byte name                     *
-//*********************4********************************************************************
+//******************************************************************************************
 const char* getEncryptionType ( int thisType )
 {
   switch (thisType)
@@ -897,32 +894,6 @@ bool connecttohost()
 
 
 //******************************************************************************************
-//                               C O N N E C T T O F I L E                                 *
-//******************************************************************************************
-// Open the local mp3-file.                                                                *
-//******************************************************************************************
-bool connecttofile()
-{
-  String path ;                                           // Full file spec
-  char*  p ;                                              // Pointer to filename
-  displayinfo ( "**** MP3 Player ****", 1 ) ;
-  path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
-  mp3file = LittleFS.open ( path, "r" ) ;                 // Open the file
-  if ( !mp3file )
-  {
-    dbgprint ( "Error opening file %s", path.c_str() ) ;  // No luck
-    return false ;
-  }
-  p = (char*)path.c_str() + 1 ;                           // Point to filename
-  showstreamtitle ( p, true ) ;                           // Show the filename as title
-  displayinfo ( "Playing from local file", 2 ) ;          // Show Source at position 60
-  icyname = "" ;                                          // No icy name yet
-  chunked = false ;                                       // File not chunked
-  return true ;
-}
-
-
-//******************************************************************************************
 //                               C O N N E C T W I F I                                     *
 //******************************************************************************************
 // Connect to WiFi using passwords available in the LittleFS.                              *
@@ -931,21 +902,37 @@ bool connecttofile()
 bool connectwifi()
 {
   char*  pfs ;                                         // Pointer to formatted string
-  WiFi.disconnect() ;                                  // After restart the router could
-  WiFi.softAPdisconnect(true) ;                        // still keep the old connection
+
+  WiFi.mode ( WIFI_STA ) ;                             // This ESP is a station
+  WiFi.disconnect ( true ) ;                           // After restart the router could
+  WiFi.softAPdisconnect ( true ) ;                     // still keep the old connection
+  delay ( 1000 );                                      // Silly things to start connection
+  WiFi.mode ( WIFI_STA ) ;
+  delay ( 1000 );
+
   WiFi.begin ( ini_block.ssid.c_str(),
                ini_block.passwd.c_str() ) ;            // Connect to selected SSID
   dbgprint ( "Try WiFi %s", ini_block.ssid.c_str() ) ; // Message to show during WiFi connect
 
   //wifi_fpm_auto_sleep_set_in_null_mode ( NULL_MODE ) ; // Disable auto sleep mode
 
-  if (  WiFi.waitForConnectResult() != WL_CONNECTED )  // Try to connect
+  if ( WiFi.waitForConnectResult() != WL_CONNECTED )   // Try to connect
   {
-    dbgprint ( "WiFi Failed!  Trying to setup AP with name %s and password %s.", NAME, NAME ) ;
-    WiFi.softAP ( NAME, NAME ) ;                       // This ESP will be an AP
+    dbgprint ( "WiFi Failed! Trying to setup AP with name %s", NAME ) ;
+    boolean res = WiFi.softAP ( NAME, NULL ) ;         // This ESP will be an AP
+
+    if ( res == true )
+    {
+      dbgprint ( "WIFI Access Point is Ready" );
+    }
+    else
+    {
+      dbgprint ( "WIFI Access Point Failed to Setup!" );
+    }
+
     delay ( 5000 ) ;
     pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Address if AP
-    displayinfo ( "*AP mode activated*", 2 ) ;
+    displayinfo ( "* AP mode activated", 2 ) ;
     return false ;
   }
 
@@ -1215,7 +1202,7 @@ void scanserial()
 //                                   M K _ L S A N                                         *
 //******************************************************************************************
 // Make al list of acceptable networks in .ini file.                                       *
-// The result will be stored in anetworks like "|SSID1|SSID2|......|SSIDN|".               *
+// The result will be stored in a networks like "|SSID1|SSID2|......|SSIDN|".              *
 // The number of acceptable networks will be stored in num_an.                             *
 //******************************************************************************************
 void mk_lsan()
@@ -1495,15 +1482,14 @@ void setup()
   Serial.begin ( 115200 ) ;                            // For debug
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
+  
   #if defined ( SRAM )
     spiram.Setup() ;                                   // Yes, do set-up
     emptyring() ;                                      // Empty the buffer
   #else
-    //ESP.setExternalHeap();                             // Set external memory to use
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
     dbgprint ( "External buffer: Address %p, free %d\n",
                                     ringbuf, ESP.getFreeHeap() ) ;
-    //ESP.resetHeap();
   #endif
 
   #ifdef FIXEDWIFI                                     // Set fixedwifi if defined
@@ -1667,31 +1653,15 @@ void loop()
                     PLAYLISTHEADER |
                     PLAYLISTDATA ) )
   {
-    if ( localfile )
+    maxfilechunk = mp3client->available() ;            // Bytes available from mp3 server
+    if ( maxfilechunk > 1024 )                         // Reduce byte count for this loop()
     {
-      maxfilechunk = mp3file.available() ;             // Bytes left in file
-      if ( maxfilechunk > 1024 )                       // Reduce byte count for this loop()
-      {
-        maxfilechunk = 1024 ;
-      }
-      while ( ringspace() && maxfilechunk-- )
-      {
-        putring ( mp3file.read() ) ;                   // Yes, store one byte in ringbuffer
-        yield() ;
-      }
+      maxfilechunk = 1024 ;
     }
-    else
+    while ( ringspace() && maxfilechunk-- )
     {
-      maxfilechunk = mp3client->available() ;          // Bytes available from mp3 server
-      if ( maxfilechunk > 1024 )                       // Reduce byte count for this loop()
-      {
-        maxfilechunk = 1024 ;
-      }
-      while ( ringspace() && maxfilechunk-- )
-      {
-        putring ( mp3client->read() ) ;                // Yes, store one byte in ringbuffer
-        yield() ;
-      }
+      putring ( mp3client->read() ) ;                  // Yes, store one byte in ringbuffer
+      yield() ;
     }
     yield() ;
   }
@@ -1710,33 +1680,13 @@ void loop()
   if ( datamode == STOPREQD )                          // STOP requested?
   {
     dbgprint ( "STOP requested" ) ;
-    if ( localfile )
-    {
-      mp3file.close() ;
-    }
-    else
-    {
-      stop_mp3client() ;                               // Disconnect if still connected
-    }
+    stop_mp3client() ;                                 // Disconnect if still connected
     handlebyte_ch ( 0, true ) ;                        // Force flush of buffer
     vs1053player.setVolume ( 0 ) ;                     // Mute
     vs1053player.stopSong() ;                          // Stop playing
     emptyring() ;                                      // Empty the ringbuffer
     datamode = STOPPED ;                               // Yes, state becomes STOPPED
     delay ( 500 ) ;
-  }
-  if ( localfile )
-  {
-    if ( datamode & ( INIT | HEADER | DATA |           // Test op playing
-                      METADATA | PLAYLISTINIT |
-                      PLAYLISTHEADER |
-                      PLAYLISTDATA ) )
-    {
-      if ( ( mp3file.available() == 0 ) && ( ringavail() == 0 ) )
-      {
-        datamode = STOPREQD ;                          // End of local mp3-file detected
-      }
-    }
   }
   if ( ini_block.newpreset != currentpreset )          // New station or next from playlist requested?
   {
@@ -1773,24 +1723,13 @@ void loop()
   {
     hostreq = false ;
     currentpreset = ini_block.newpreset ;              // Remember current preset
-    
-    localfile = host.startsWith ( "localhost/" ) ;     // Find out if this URL is on localhost
-    if ( localfile )                                   // Play file from localhost?
+
+    if ( host.startsWith ( "ihr/" ) )                  // iHeartRadio station requested?
     {
-      if ( connecttofile() )                           // Yes, open mp3-file
-      {
-        datamode = DATA ;                              // Start in DATA mode
-      }
+      host = host.substring ( 4 ) ;                    // Yes, remove "ihr/"
+      host = xmlparse ( host ) ;                       // Parse the xml to get the host
     }
-    else
-    {
-      if ( host.startsWith ( "ihr/" ) )                // iHeartRadio station requested?
-      {
-        host = host.substring ( 4 ) ;                  // Yes, remove "ihr/"
-        host = xmlparse ( host ) ;                     // Parse the xml to get the host
-      }
-      connecttohost() ;                                // Switch to new host
-    }
+    connecttohost() ;                                  // Switch to new host
   }
   if ( xmlreq )                                        // Directly xml requested?
   {
@@ -2062,8 +2001,8 @@ void handlebyte ( uint8_t b, bool force )
       LFcount++ ;                                      // Count linefeeds
       if ( chkhdrline ( metaline.c_str() ) )           // Reasonable input?
       {
-        lcml = metaline ;                              // Use lower case for compare
-        lcml.toLowerCase() ;
+        lcml = metaline ;
+        lcml.toLowerCase() ;                           // Use lower case for compare
         dbgprint ( metaline.c_str() ) ;                // Yes, Show it
         if ( lcml.startsWith ( "location: " ) )        // Redirection?
         {
@@ -2073,7 +2012,7 @@ void handlebyte ( uint8_t b, bool force )
             host = metaline.substring ( 17 ) ;         // Yes, get new URL
             hostreq = true ;
           }
-          else if ( lcml.indexOf ( "https://" ) )      // Redirection with ttps://?
+          else if ( lcml.indexOf ( "https://" ) )      // Redirection with https://?
           {
             host = metaline.substring ( 18 ) ;         // Yes, get new URL
             hostreq = true ;
@@ -2107,8 +2046,7 @@ void handlebyte ( uint8_t b, bool force )
         }
         else if ( lcml.startsWith ( "transfer-encoding:" ) )
         {
-          // Station provides chunked transfer
-          if ( lcml.endsWith ( "chunked" ) )
+          if ( lcml.endsWith ( "chunked" ) )           // Station provides chunked transfer
           {
             chunked = true ;                           // Remember chunked transfer mode
             chunkcount = 0 ;                           // Expect chunkcount in DATA
@@ -2128,7 +2066,6 @@ void handlebyte ( uint8_t b, bool force )
         #if defined ( SRAM )
           spiram.spiramdelay = SPIRAMDELAY ;           // Start delay
         #endif
-          //emptyring() ;                              // Empty SPIRAM buffer (not sure about this)
           datacount = metaint ;                        // Number of bytes before first metadata
           bufcnt = 0 ;                                 // Reset buffer count
           vs1053player.switchToMp3Mode() ;

@@ -14,7 +14,7 @@
 #define SRAM_CH_SIZE  4096                            // Total size SPI RAM in chunks
 #define SPIRAMDELAY   100000                          // Delay (in bytes) before reading from SPIRAM
 
-class SPIRAM 
+class SPIRAM
 {
   public:
                       SPIRAM() ;
@@ -35,10 +35,9 @@ class SPIRAM
     uint16_t          chcount ;                             // Number of chunks currently in buffer
     uint32_t          readinx ;                             // Read index
     uint32_t          writeinx ;                            // write index
-    uint32_t          spiTransfer32 ( uint32_t data ) ;
-    void spiramRead   ( uint32_t addr, uint8_t *buff, uint32_t size ) ;
-    void spiramWrite  ( uint32_t addr, uint8_t *buff, uint32_t size ) ;
-} ;
+    void              spiramRead   ( uint32_t addr, uint8_t *buff, uint32_t size ) ;
+    void              spiramWrite  ( uint32_t addr, uint8_t *buff, uint32_t size ) ;
+};
 
 
 SPIRAM spiram ;
@@ -49,47 +48,43 @@ SPIRAM spiram ;
 //******************************************************************************************
 // Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
 //******************************************************************************************
-uint32_t SPIRAM::spiTransfer32 ( uint32_t data )
-{
-  union {
-      uint32_t val ;
-      struct {
-          uint16_t lsb ;
-          uint16_t msb ;
-      } ;
-  } in, out ;
-  in.val = data ;
-  out.msb = SPI.transfer16 ( in.msb ) ;
-  out.lsb = SPI.transfer16 ( in.lsb ) ;
-  return out.val ;
-}
-
 void SPIRAM::spiramWrite ( uint32_t addr, uint8_t *buff, uint32_t size )
 {
   int i = 0;
-  while ( size-- )
-  {
-    SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+  SPI.beginTransaction ( SPISettings(SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+  while ( size-- ) {
     digitalWrite ( SRAM_CS, LOW ) ;
-    spiTransfer32 ( (0x02<<24)|(addr++&0x00ffffff) ) ;   // Set write mode
-    SPI.transfer ( buff[i++] ) ;
+
+    uint32_t data = (0x02 << 24) | (addr++ & 0x00ffffff);
+    SPI.transfer16(data >> 16);     // Transfer MSB
+    SPI.transfer16(data & 0xFFFF);  // Transfer LSB
+    SPI.transfer(buff[i++]);
+
     digitalWrite ( SRAM_CS, HIGH ) ;
-    SPI.endTransaction();
+
+    if (i % 32 == 0) yield(); // Yield to reset the watchdog every 32 iterations
   }
+
+  SPI.endTransaction();
 }
 
 void SPIRAM::spiramRead ( uint32_t addr, uint8_t *buff, uint32_t size )
 {
   int i = 0;
-  while ( size-- )
-  {
-    SPI.beginTransaction ( SPISettings ( SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
-    digitalWrite ( SRAM_CS, LOW ) ;
-    spiTransfer32 ( (0x03<<24)|(addr++&0x00ffffff) ) ;   // Set read mode
-    buff[i++] = SPI.transfer ( 0x00 ) ;
+  SPI.beginTransaction ( SPISettings(SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+  while ( size-- ) {
+  digitalWrite ( SRAM_CS, LOW ) ;
+
+    uint32_t data = (0x03 << 24) | (addr++ & 0x00ffffff);
+    SPI.transfer16(data >> 16);     // Transfer MSB
+    SPI.transfer16(data & 0xFFFF);  // Transfer LSB
+    buff[i++] = SPI.transfer(0x00);
+
     digitalWrite ( SRAM_CS, HIGH ) ;
-    SPI.endTransaction();
+
+    if (i % 32 == 0) yield(); // Yield to reset the watchdog every 32 iterations
   }
+  SPI.endTransaction();
 }
 
 
@@ -122,7 +117,7 @@ uint16_t SPIRAM::dataAvailable()
 //******************************************************************************************
 uint16_t SPIRAM::getFreeBufferSpace()
 {
-  return ( SRAM_CH_SIZE - chcount ) ;                  // Return number of chunks available
+  return ( SRAM_CH_SIZE - chcount ) ;                   // Return number of chunks available
 }
 
 
@@ -165,11 +160,11 @@ void SPIRAM::bufferReset()
 }
 
 
-//***********************************************************************************************
-//                                S P I R A M                                                   *
-//***********************************************************************************************
-// Constructor for the SPI RAM.                                                                 *
-//***********************************************************************************************
+//******************************************************************************************
+//                                S P I R A M                                              *
+//******************************************************************************************
+// Constructor for the SPI RAM.                                                            *
+//******************************************************************************************
 SPIRAM::SPIRAM()
 {
   Cs = SRAM_CS ;

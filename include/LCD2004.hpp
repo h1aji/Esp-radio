@@ -90,7 +90,7 @@ LCD2004* lcd = NULL ;
 
 bool dsp_begin()
 {
-  dbgprint ( "Init I2C LCD2004: SDA pin %d, SCL pin %d",
+  dbgprint ( "Init I2C LCD2004: SDA GPIO %d, SCL GPIO %d",
                                 PIN_WIRE_SDA, PIN_WIRE_SCL ) ;
   if ( ( PIN_WIRE_SDA == 4 ) && ( PIN_WIRE_SCL == 5 ) )       // Make sure correct pins are used
   {

@@ -1,5 +1,5 @@
 //
-#define VERSION "Wed, 30 Apr 2023 21:30:00 GMT"
+#define VERSION "Sun, 2 Jun 2024 19:10:00 GMT"
 //
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
 // Not that the password of an AP must be at least as long as 8 characters.
