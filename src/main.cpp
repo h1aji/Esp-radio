@@ -178,7 +178,7 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 
 
 // The object for the MP3 player
-VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
+VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ, VS1053_RST ) ;
 
 
 //******************************************************************************************

@@ -1,5 +1,5 @@
 //
-#define VERSION "Wed, 30 Apr 2023 21:30:00 GMT"
+#define VERSION "Sun, 2 Jun 2024 19:10:00 GMT"
 //
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
 // Not that the password of an AP must be at least as long as 8 characters.
@@ -37,7 +37,8 @@
 // Pins for VS1053 module
 #define VS1053_CS     0
 #define VS1053_DCS    16
-#define VS1053_DREQ   10
+#define VS1053_DREQ   9
+#define VS1053_RST    10
 //
 // Definitions for 3 control switches on analog input
 // You can test the analog input values by holding down the switch and select /?analog=1
