@@ -438,7 +438,8 @@ void displayvolume ( uint8_t vol )
 void displaytime ( const char* str )
 {
   const char* WDAYS [] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" } ;
-  char        datetxt[24] ;
+  char        datetxt[28] ;
+  char        timetxt[6] ;                               // Temporary string for hours and minutes
   static char oldstr = '\0' ;                            // To check time difference
 
   if ( ( str == NULL ) || ( str[0] == '\0' ) )           // Check time string
@@ -447,18 +448,21 @@ void displaytime ( const char* str )
   }
   else
   {
-    if ( str[7] == oldstr )                              // Difference?
+    if ( str[4] == oldstr )                              // Difference?
     {
       return ;                                           // No, quick return
     }
-    sprintf ( datetxt, "%s %02d.%02d.  %s",              // Format new time to a string
+    strncpy(timetxt, str, 5);                            // Copy first 5 characters (HH:MM)
+    timetxt[5] = '\0';                                   // Null-terminate the string
+    sprintf ( datetxt, "%s  %02d.%02d.%02d  %s",         // Format new time to a string
                        WDAYS[timeinfo.tm_wday],
                        timeinfo.tm_mday,
                        timeinfo.tm_mon + 1,
-                       str ) ;
+                       (timeinfo.tm_year + 1900) % 100,  // last 2 digits of the year
+                       timetxt ) ;
   }
   dline[0].str = String ( datetxt ) ;                    // Copy datestring or empty string to LCD line 0
-  oldstr = str[7] ;                                      // For next compare, last digit of time
+  oldstr = str[4] ;                                      // For next compare, last digit of time
   dsp_update_line ( 0 ) ;
 }
 
