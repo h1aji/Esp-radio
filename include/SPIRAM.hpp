@@ -52,17 +52,21 @@ void SPIRAM::spiramWrite ( uint32_t addr, uint8_t *buff, uint32_t size )
 {
   int i = 0;
   SPI.beginTransaction ( SPISettings(SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
-  while ( size-- ) {
+  while ( size-- )
+  {
     digitalWrite ( SRAM_CS, LOW ) ;
 
-    uint32_t data = (0x02 << 24) | (addr++ & 0x00ffffff);
-    SPI.transfer16(data >> 16);     // Transfer MSB
-    SPI.transfer16(data & 0xFFFF);  // Transfer LSB
-    SPI.transfer(buff[i++]);
+    uint32_t data = ( 0x02 << 24 ) | (addr++ & 0x00ffffff ) ;
+    SPI.transfer16 ( data >> 16 ) ;       // Transfer MSB
+    SPI.transfer16 ( data & 0xFFFF ) ;    // Transfer LSB
+    SPI.transfer ( buff[i++] ) ;
 
     digitalWrite ( SRAM_CS, HIGH ) ;
 
-    if (i % 32 == 0) yield(); // Yield to reset the watchdog every 32 iterations
+    if (i % 32 == 0)
+    {
+      yield() ;                           // Yield to reset the watchdog every 32 iterations
+    }
   }
 
   SPI.endTransaction();
@@ -72,17 +76,21 @@ void SPIRAM::spiramRead ( uint32_t addr, uint8_t *buff, uint32_t size )
 {
   int i = 0;
   SPI.beginTransaction ( SPISettings(SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
-  while ( size-- ) {
-  digitalWrite ( SRAM_CS, LOW ) ;
+  while ( size-- )
+  {
+    digitalWrite ( SRAM_CS, LOW ) ;
 
-    uint32_t data = (0x03 << 24) | (addr++ & 0x00ffffff);
-    SPI.transfer16(data >> 16);     // Transfer MSB
-    SPI.transfer16(data & 0xFFFF);  // Transfer LSB
-    buff[i++] = SPI.transfer(0x00);
+    uint32_t data = ( 0x03 << 24 ) | ( addr++ & 0x00ffffff ) ;
+    SPI.transfer16 ( data >> 16 ) ;       // Transfer MSB
+    SPI.transfer16 ( data & 0xFFFF ) ;    // Transfer LSB
+    buff[i++] = SPI.transfer ( 0x00 ) ;
 
     digitalWrite ( SRAM_CS, HIGH ) ;
 
-    if (i % 32 == 0) yield(); // Yield to reset the watchdog every 32 iterations
+    if (i % 32 == 0)
+    {
+      yield() ;                           // Yield to reset the watchdog every 32 iterations
+    }
   }
   SPI.endTransaction();
 }
