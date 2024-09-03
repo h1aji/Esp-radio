@@ -25,24 +25,6 @@ extern "C"
 // Specify configuration
 #include "config.hpp"
 //
-#include "VS1053.hpp"
-//
-#if defined ( SRAM )
-  #include "SPIRAM.hpp"
-#endif
-//
-#if defined ( LCD )
-  #include "LCD2004.hpp"
-#else
-// Empty declaration
-  #define displayinfo(a,b)
-  #define displaytime(a)
-#endif
-//
-#if defined ( IR )
-  #include "IR.hpp"
-#endif
-//
 //******************************************************************************************
 // Forward declaration of various functions                                                *
 //******************************************************************************************
@@ -1544,7 +1526,7 @@ void setup()
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;              // And sketch info
 #if defined ( IR )
-  setupIR( IR_PIN ) ;
+  setupIR ( IR_PIN ) ;
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
   if ( vs1053player.getChipVersion() == 4 )            // Check if we are using VS1053B chip
