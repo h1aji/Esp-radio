@@ -16,7 +16,7 @@
 //#define FIXEDWIFI ""
 //
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-#define RINGBFSIZ         16000
+#define RINGBFSIZ           16000
 //
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS     20
