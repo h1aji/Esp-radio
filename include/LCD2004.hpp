@@ -57,9 +57,9 @@ void displayinfo    ( const char *str, int pos ) ;
 bool dsp_begin      ();
 void dsp_update     ();
 
-char*       dbgprint ( const char* format, ... ) ;          // Print a formatted debug line
-extern      struct tm timeinfo ;                            // Will be filled by NTP server
-void        utf8ascii_ip ( char* s ) ;
+extern char*  dbgprint ( const char* format, ... ) ;       // Print a formatted debug line
+extern struct tm timeinfo ;                                // Will be filled by NTP server
+extern void   utf8ascii_ip ( char* s ) ;
 
 class LCD2004
 {

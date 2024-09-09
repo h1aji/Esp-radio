@@ -7,7 +7,7 @@
 
 #include "SPI.h"
 
-#define SRAM_CS       15                              // CS pin is connected to GPIO 15
+#define SRAM_CS       PIN_SPI_SS                      // CS pin is connected to GPIO 15
 #define SRAM_FREQ     20000000                        // 23LC1024 supports theorically up to 20MHz
 #define SRAM_SIZE     131072                          // Total size SPI RAM in bytes
 #define CHUNKSIZE     32                              // Chunk size
