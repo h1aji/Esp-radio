@@ -31,16 +31,16 @@ extern "C"
   #include "SPIRAM.hpp"
 #endif
 //
+#if defined ( IR )
+  #include "IR.hpp"
+#endif
+//
 #if defined ( LCD )
   #include "LCD2004.hpp"
 #else
 // Empty declaration
   #define displayinfo(a,b)
   #define displaytime(a)
-#endif
-//
-#if defined ( IR )
-  #include "IR.hpp"
 #endif
 //
 //******************************************************************************************
@@ -839,7 +839,7 @@ bool connecttohost()
   String      hostwoext ;                           // Host without extension and portnumber
 
   stop_mp3client() ;                                // Disconnect if still connected
-  dbgprint ( "Connect to new host %s", host.c_str() ) ;
+  // dbgprint ( "Connect to new host %s", host.c_str() ) ;
   displayinfo ( "** Internet radio **", 1 ) ;
   displaytime ( "" ) ;                              // Clear time on LCD screen
 
@@ -903,23 +903,40 @@ bool connectwifi()
 {
   char*  pfs ;                                         // Pointer to formatted string
 
-  WiFi.mode ( WIFI_STA ) ;                             // This ESP is a station
-  WiFi.disconnect ( true ) ;                           // After restart the router could
-  WiFi.softAPdisconnect ( true ) ;                     // still keep the old connection
-  delay ( 1000 );                                      // Silly things to start connection
-  WiFi.mode ( WIFI_STA ) ;
+  WiFi.mode ( WIFI_STA ) ;                            // Set ESP8266 as a station
+  WiFi.disconnect ( true ) ;                          // Disconnect from any previous connections
   delay ( 1000 );
 
   WiFi.begin ( ini_block.ssid.c_str(),
                ini_block.passwd.c_str() ) ;            // Connect to selected SSID
   dbgprint ( "Try WiFi %s", ini_block.ssid.c_str() ) ; // Message to show during WiFi connect
 
-  //wifi_fpm_auto_sleep_set_in_null_mode ( NULL_MODE ) ; // Disable auto sleep mode
-
-  if ( WiFi.waitForConnectResult() != WL_CONNECTED )   // Try to connect
+  unsigned long startTime = millis();                  // Custom Wi-Fi connection loop with timeout
+  const unsigned long timeout = 10000;                 // 10 seconds timeout
+  
+  while ( WiFi.status() != WL_CONNECTED && millis() - startTime < timeout )
   {
-    dbgprint ( "WiFi Failed! Trying to setup AP with name %s", NAME ) ;
-    boolean res = WiFi.softAP ( NAME, NULL ) ;         // This ESP will be an AP
+    delay ( 500 ) ;                                    // Yield time for background tasks
+    ESP.wdtFeed() ;                                    // Feed the watchdog to prevent WDT reset
+    Serial.print ( "." ) ;
+  }
+  Serial.print ( "\n" ) ;                              // Jump to next line
+
+  if ( WiFi.status() == WL_CONNECTED )                 // Successful connection
+  {
+    dbgprint ( "WiFi Connected!" ) ;
+    pfs = dbgprint ( "IP = %d.%d.%d.%d",
+                    WiFi.localIP()[0], 
+                    WiFi.localIP()[1], 
+                    WiFi.localIP()[2], 
+                    WiFi.localIP()[3] ) ;
+    displayinfo ( pfs, 3 ) ;                           // Show IP address on display
+    return true;
+  } else {
+    // Failed to connect, switch to AP mode
+    dbgprint ( "WiFi Failed! Trying to setup AP with name %s", NAME );
+
+    boolean res = WiFi.softAP ( NAME, NULL ) ;         // Set up Access Point mode
 
     if ( res == true )
     {
@@ -931,18 +948,10 @@ bool connectwifi()
     }
 
     delay ( 5000 ) ;
-    pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Address if AP
+    pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Display AP mode IP address
     displayinfo ( "* AP mode activated", 2 ) ;
     return false ;
   }
-
-  pfs = dbgprint ( "IP = %d.%d.%d.%d",
-                   WiFi.localIP()[0], 
-                   WiFi.localIP()[1], 
-                   WiFi.localIP()[2], 
-                   WiFi.localIP()[3] ) ;
-  displayinfo ( pfs, 3 ) ;                             // Show IP address
-  return true ;
 }
 
 
@@ -1544,7 +1553,7 @@ void setup()
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;              // And sketch info
 #if defined ( IR )
-  setupIR ( IR_PIN ) ;
+  setupIR() ;
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
   if ( vs1053player.getChipVersion() == 4 )            // Check if we are using VS1053B chip
@@ -2007,12 +2016,12 @@ void handlebyte ( uint8_t b, bool force )
         if ( lcml.startsWith ( "location: " ) )        // Redirection?
         {
           redirection = true ;
-          if ( lcml.indexOf ( "http://" ) > 8 )        // Redirection with http://?
+          if ( lcml.indexOf ( "http://" ) > 8 )        // Redirection with http:// ?
           {
             host = metaline.substring ( 17 ) ;         // Yes, get new URL
             hostreq = true ;
           }
-          else if ( lcml.indexOf ( "https://" ) )      // Redirection with https://?
+          else if ( lcml.indexOf ( "https://" ) )      // Redirection with https:// ?
           {
             host = metaline.substring ( 18 ) ;         // Yes, get new URL
             hostreq = true ;
