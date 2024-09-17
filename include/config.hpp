@@ -30,8 +30,6 @@
 // Enable support for Infra-red receiver by uncommenting the next line
 #define IR
 //
-// Set IR pin to GPIO 2
-#define IR_PIN      2
 // IR codes assigned to buttons
 uint16_t ir_preset1 = 0xA25D ;
 uint16_t ir_preset2 = 0x629D ;

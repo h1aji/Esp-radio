@@ -7,7 +7,7 @@
 
 #include "SPI.h"
 
-#define SRAM_CS       PIN_SPI_SS                      // CS pin is connected to GPIO 15
+#define SRAM_CS       PIN_SPI_SS                      // CS pin connected to GPIO 15
 #define SRAM_FREQ     20000000                        // 23LC1024 supports theorically up to 20MHz
 #define SRAM_SIZE     131072                          // Total size SPI RAM in bytes
 #define CHUNKSIZE     32                              // Chunk size
@@ -63,7 +63,7 @@ void SPIRAM::spiramWrite ( uint32_t addr, uint8_t *buff, uint32_t size )
 
     digitalWrite ( SRAM_CS, HIGH ) ;
 
-    if (i % 32 == 0)
+    if (i % CHUNKSIZE == 0)
     {
       yield() ;                           // Yield to reset the watchdog every 32 iterations
     }
@@ -87,7 +87,7 @@ void SPIRAM::spiramRead ( uint32_t addr, uint8_t *buff, uint32_t size )
 
     digitalWrite ( SRAM_CS, HIGH ) ;
 
-    if (i % 32 == 0)
+    if (i % CHUNKSIZE == 0)
     {
       yield() ;                           // Yield to reset the watchdog every 32 iterations
     }

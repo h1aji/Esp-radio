@@ -8,7 +8,7 @@
 #include "SPI.h"
 #include "vs1053b-patches.h"
 
-char*       dbgprint ( const char* format, ... ) ; // Print a formatted debug line
+extern char* dbgprint ( const char* format, ... ) ;
 
 class VS1053
 {
@@ -261,7 +261,7 @@ void VS1053::begin()
   //printDetails ( "Right after reset/startup" ) ;
   delay ( 20 ) ;
   //printDetails ( "20 msec after reset" ) ;
-  testComm ( "Slow SPI,Testing VS1053 read/write registers..." ) ;
+  testComm ( "Slow SPI, Testing VS1053 read/write registers..." ) ;
   // Most VS1053 modules will start up in midi mode.  The result is that there is no audio
   // when playing MP3.  You can modify the board, but there is a more elegant way:
   wram_write ( 0xC017, 3 ) ;                            // GPIO DDR = 3
