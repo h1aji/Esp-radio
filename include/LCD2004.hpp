@@ -21,8 +21,6 @@
 
 #include <Wire.h>
 
-#define LCD_I2C_ADDRESS                     0x27            // Adjust for your display
-
 #define ACKENA true                                         // Enable ACK for I2C communication
 
 #define DELAY_ENABLE_PULSE_SETTLE           50              // Command requires > 37us to settle
@@ -59,14 +57,14 @@ void displayinfo    ( const char *str, int pos ) ;
 bool dsp_begin      ();
 void dsp_update     ();
 
-char*       dbgprint ( const char* format, ... ) ;          // Print a formatted debug line
-extern      struct tm timeinfo ;                            // Will be filled by NTP server
-void        utf8ascii_ip ( char* s ) ;
+extern char*  dbgprint ( const char* format, ... ) ;       // Print a formatted debug line
+extern struct tm timeinfo ;                                // Will be filled by NTP server
+extern void   utf8ascii_ip ( char* s ) ;
 
 class LCD2004
 {
   public:
-                     LCD2004 ( uint8_t sda, uint8_t scl ) ; // Constructor
+                     LCD2004 ( int8_t sda, int8_t scl ) ;   // Constructor
     void             print ( char c ) ;                     // Send 1 char
     void             reset() ;                              // Perform reset
     void             sclear() ;                             // Clear the screen
@@ -82,6 +80,7 @@ class LCD2004
     uint8_t          bl  = FLAG_BACKLIGHT_ON ;              // Backlight in every command
     uint8_t          xchar = 0 ;                            // Current cursor position (text)
     uint8_t          ychar = 0 ;                            // Current cursor position (text)
+    byte             LCD_I2C_ADDRESS;
 } ;
 
 
@@ -253,26 +252,28 @@ void LCD2004::reset()
 //**************************************************************************************************
 // Utility to scan the I2C bus.                                                                    *
 //**************************************************************************************************
-// void i2cscan()
-// {
-//   byte error, address ;
+byte i2cscan()
+{
+  byte error, address ;
 
-//   dbgprint ( "Scanning I2C bus..." ) ;
+  dbgprint ( "Scanning I2C bus..." ) ;
 
-//   for ( address = 1 ; address < 127 ; address++ )
-//   {
-//     Wire.beginTransmission ( address ) ;
-//     error = Wire.endTransmission() ;
-//     if ( error == 0 )
-//     {
-//       dbgprint ( "I2C device 0x%02X found", address ) ;
-//     }
-//     else if ( error == 4 )
-//     {
-//       dbgprint ( "Error 4 at address 0x%02X", address ) ;
-//     }
-//   }
-// }
+  for ( address = 1 ; address < 127 ; address++ )
+  {
+    Wire.beginTransmission ( address ) ;
+    error = Wire.endTransmission() ;
+    if ( error == 0 )
+    {
+      dbgprint ( "I2C device 0x%02X found", address ) ;
+      return address;                                   // Return the address of the found device
+    }
+    else if ( error == 4 )
+    {
+      dbgprint ( "Error 4 at address 0x%02X", address ) ;
+    }
+  }
+  return 0;                                             // Return 0 if no device is found
+}
 
 
 //***********************************************************************************************
@@ -280,14 +281,23 @@ void LCD2004::reset()
 //***********************************************************************************************
 // Constructor for the display.                                                                 *
 //***********************************************************************************************
-LCD2004::LCD2004 ( uint8_t sda, uint8_t scl )
+LCD2004::LCD2004 ( int8_t sda, int8_t scl )
 {
   Wire.begin ( sda, scl ) ;
   delay ( 50 ) ;
+
+  LCD_I2C_ADDRESS = i2cscan();                          // Assign the found address to LCD_I2C_ADDRESS
+
+  if ( LCD_I2C_ADDRESS == 0 )
+  {
+    dbgprint ( "No I2C devices found." ) ;
+    return;                                             // Exit if no device is found
+  }
+
   Wire.beginTransmission ( LCD_I2C_ADDRESS ) ;
   if ( Wire.endTransmission() != 0 )
   {
-    dbgprint ( "Display not found on I2C 0x%02X",
+    dbgprint ( "Display not found at I2C 0x%02X address",
                   LCD_I2C_ADDRESS ) ;                   // Safety check, make sure the PCF8574 is connected
   }
   reset() ;
@@ -438,7 +448,8 @@ void displayvolume ( uint8_t vol )
 void displaytime ( const char* str )
 {
   const char* WDAYS [] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" } ;
-  char        datetxt[24] ;
+  char        datetxt[28] ;
+  char        timetxt[6] ;                               // Temporary string for hours and minutes
   static char oldstr = '\0' ;                            // To check time difference
 
   if ( ( str == NULL ) || ( str[0] == '\0' ) )           // Check time string
@@ -447,18 +458,21 @@ void displaytime ( const char* str )
   }
   else
   {
-    if ( str[7] == oldstr )                              // Difference?
+    if ( str[4] == oldstr )                              // Difference?
     {
       return ;                                           // No, quick return
     }
-    sprintf ( datetxt, "%s %02d.%02d.  %s",              // Format new time to a string
+    strncpy(timetxt, str, 5);                            // Copy first 5 characters (HH:MM)
+    timetxt[5] = '\0';                                   // Null-terminate the string
+    sprintf ( datetxt, "%s  %02d.%02d.%02d  %s",         // Format new time to a string
                        WDAYS[timeinfo.tm_wday],
                        timeinfo.tm_mday,
                        timeinfo.tm_mon + 1,
-                       str ) ;
+                       (timeinfo.tm_year + 1900) % 100,  // last 2 digits of the year
+                       timetxt ) ;
   }
   dline[0].str = String ( datetxt ) ;                    // Copy datestring or empty string to LCD line 0
-  oldstr = str[7] ;                                      // For next compare, last digit of time
+  oldstr = str[4] ;                                      // For next compare, last digit of time
   dsp_update_line ( 0 ) ;
 }
 

@@ -22,10 +22,10 @@ const char about_html[] PROGMEM = R"=====(
   </center>
 	<p>Esp-radio - web radio receiver for ESP8266 and VS1053 MP3 module.<br>
 	This project is available on <a target="blank" href="https://github.com/h1aji/Esp-radio">Github</a>.</p>
-	<p>Author: Ed Smallenburg<br>
-  Modified by: Murad Ustarkhanov<br>
-	Web interface design: <a target="blank" href="http://www.sanderjochems.nl/">Sander Jochems</a><br>
-	Android App: <a target="blank" href="https://play.google.com/store/apps/details?id=com.thunkable.android.sander542jochems.ESP_Radio">Sander Jochems</a><br>
+	<p>Author: <a target="blank" href="https://github.com/Edzelf">Ed Smallenburg</a><br>
+  Modified by: <a target="blank" href="https://github.com/h1aji">Murad Ustarkhanov</a><br>
+	Web interface design: <a target="blank" href="https://github.com/Sander0542">Sander Jochems</a><br>
+	Android App: <a target="blank" href="https://esp-radio.en.aptoide.com/app">Aptoide</a><br>
 	First Released in January 2017</p>
  </body>
 </html>

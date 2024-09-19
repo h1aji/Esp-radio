@@ -7,33 +7,33 @@
 
 #include "Arduino.h"
 
+#define IR_PIN     2 // Set IR pin to GPIO 2
 
-char*  dbgprint ( const char* format, ... ) ;  // Print a formatted debug line
-const  char*  analyzeCmd ( const char* str ) ;
+extern       char* dbgprint ( const char* format, ... ) ;
+extern const char* analyzeCmd ( const char* str ) ;
 
-uint16_t   ir_preset1 = 0xA25D ;
-uint16_t   ir_preset2 = 0x629D ;
-uint16_t   ir_preset3 = 0xE21D ;
-uint16_t   ir_preset4 = 0x22DD ;
-uint16_t   ir_preset5 = 0x02FD ;
-uint16_t   ir_preset6 = 0xC23D ;
-uint16_t   ir_preset7 = 0xE01F ;
-uint16_t   ir_preset8 = 0xA857 ;
-uint16_t   ir_preset9 = 0x906F ;
-uint16_t   ir_preset0 = 0x9867 ;
-uint16_t   ir_stop    = 0xB04F ; // #
-uint16_t   ir_play    = 0x6897 ; // *
-uint16_t   ir_volup   = 0x18E7 ;
-uint16_t   ir_voldown = 0x4AB5 ;
-uint16_t   ir_mute    = 0x38C7 ;
-uint16_t   ir_next    = 0x5AA5 ;
-uint16_t   ir_prev    = 0x10EF ;
+extern uint16_t ir_preset1 ;
+extern uint16_t ir_preset2 ;
+extern uint16_t ir_preset3 ;
+extern uint16_t ir_preset4 ;
+extern uint16_t ir_preset5 ;
+extern uint16_t ir_preset6 ;
+extern uint16_t ir_preset7 ;
+extern uint16_t ir_preset8 ;
+extern uint16_t ir_preset9 ;
+extern uint16_t ir_preset0 ;
+extern uint16_t ir_stop ;
+extern uint16_t ir_play ;
+extern uint16_t ir_volup ;
+extern uint16_t ir_voldown ;
+extern uint16_t ir_mute ;
+extern uint16_t ir_next ;
+extern uint16_t ir_prev ;
 
-int        ir_intcount = 0 ;      // For test IR interrupts
-uint16_t   ir_value = 0 ;         // IR code
-uint32_t   ir_0 = 550 ;           // Average duration of an IR short pulse
-uint32_t   ir_1 = 1650 ;          // Average duration of an IR long pulse
-
+       int      ir_intcount = 0 ;              // For test IR interrupts
+       uint16_t ir_value = 0 ;                 // IR code
+       uint32_t ir_0 = 550 ;                   // Average duration of an IR short pulse
+       uint32_t ir_1 = 1650 ;                  // Average duration of an IR long pulse
 
 
 //**************************************************************************************************
@@ -219,9 +219,9 @@ void scanIR()
 //**************************************************************************************************
 // Setup IR input.                                                                                 *
 //**************************************************************************************************
-void setupIR ( uint8_t ir_pin )
+void setupIR()
 {
-  dbgprint ( "Enable GPIO %d for IR", ir_pin ) ;
-  pinMode ( ir_pin, INPUT ) ;                        // Pin for IR receiver TSOP4838
-  attachInterrupt ( ir_pin, isr_IR, CHANGE ) ;       // Interrupts will be handled by isr_IR
+  dbgprint ( "Enable GPIO %d for IR", IR_PIN ) ;
+  pinMode ( IR_PIN, INPUT ) ;                        // Pin for IR receiver TSOP4838
+  attachInterrupt ( IR_PIN, isr_IR, CHANGE ) ;       // Interrupts will be handled by isr_IR
 }

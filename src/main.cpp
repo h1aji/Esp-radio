@@ -31,16 +31,16 @@ extern "C"
   #include "SPIRAM.hpp"
 #endif
 //
+#if defined ( IR )
+  #include "IR.hpp"
+#endif
+//
 #if defined ( LCD )
   #include "LCD2004.hpp"
 #else
 // Empty declaration
   #define displayinfo(a,b)
   #define displaytime(a)
-#endif
-//
-#if defined ( IR )
-  #include "IR.hpp"
 #endif
 //
 //******************************************************************************************
@@ -839,7 +839,7 @@ bool connecttohost()
   String      hostwoext ;                           // Host without extension and portnumber
 
   stop_mp3client() ;                                // Disconnect if still connected
-  dbgprint ( "Connect to new host %s", host.c_str() ) ;
+  // dbgprint ( "Connect to new host %s", host.c_str() ) ;
   displayinfo ( "** Internet radio **", 1 ) ;
   displaytime ( "" ) ;                              // Clear time on LCD screen
 
@@ -903,23 +903,40 @@ bool connectwifi()
 {
   char*  pfs ;                                         // Pointer to formatted string
 
-  WiFi.mode ( WIFI_STA ) ;                             // This ESP is a station
-  WiFi.disconnect ( true ) ;                           // After restart the router could
-  WiFi.softAPdisconnect ( true ) ;                     // still keep the old connection
-  delay ( 1000 );                                      // Silly things to start connection
-  WiFi.mode ( WIFI_STA ) ;
+  WiFi.mode ( WIFI_STA ) ;                            // Set ESP8266 as a station
+  WiFi.disconnect ( true ) ;                          // Disconnect from any previous connections
   delay ( 1000 );
 
   WiFi.begin ( ini_block.ssid.c_str(),
                ini_block.passwd.c_str() ) ;            // Connect to selected SSID
   dbgprint ( "Try WiFi %s", ini_block.ssid.c_str() ) ; // Message to show during WiFi connect
 
-  //wifi_fpm_auto_sleep_set_in_null_mode ( NULL_MODE ) ; // Disable auto sleep mode
-
-  if ( WiFi.waitForConnectResult() != WL_CONNECTED )   // Try to connect
+  unsigned long startTime = millis();                  // Custom Wi-Fi connection loop with timeout
+  const unsigned long timeout = 10000;                 // 10 seconds timeout
+  
+  while ( WiFi.status() != WL_CONNECTED && millis() - startTime < timeout )
   {
-    dbgprint ( "WiFi Failed! Trying to setup AP with name %s", NAME ) ;
-    boolean res = WiFi.softAP ( NAME, NULL ) ;         // This ESP will be an AP
+    delay ( 500 ) ;                                    // Yield time for background tasks
+    ESP.wdtFeed() ;                                    // Feed the watchdog to prevent WDT reset
+    Serial.print ( "." ) ;
+  }
+  Serial.print ( "\n" ) ;                              // Jump to next line
+
+  if ( WiFi.status() == WL_CONNECTED )                 // Successful connection
+  {
+    dbgprint ( "WiFi Connected!" ) ;
+    pfs = dbgprint ( "IP = %d.%d.%d.%d",
+                    WiFi.localIP()[0], 
+                    WiFi.localIP()[1], 
+                    WiFi.localIP()[2], 
+                    WiFi.localIP()[3] ) ;
+    displayinfo ( pfs, 3 ) ;                           // Show IP address on display
+    return true;
+  } else {
+    // Failed to connect, switch to AP mode
+    dbgprint ( "WiFi Failed! Trying to setup AP with name %s", NAME );
+
+    boolean res = WiFi.softAP ( NAME, NULL ) ;         // Set up Access Point mode
 
     if ( res == true )
     {
@@ -931,18 +948,10 @@ bool connectwifi()
     }
 
     delay ( 5000 ) ;
-    pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Address if AP
+    pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Display AP mode IP address
     displayinfo ( "* AP mode activated", 2 ) ;
     return false ;
   }
-
-  pfs = dbgprint ( "IP = %d.%d.%d.%d",
-                   WiFi.localIP()[0], 
-                   WiFi.localIP()[1], 
-                   WiFi.localIP()[2], 
-                   WiFi.localIP()[3] ) ;
-  displayinfo ( pfs, 3 ) ;                             // Show IP address
-  return true ;
 }
 
 
@@ -1483,10 +1492,7 @@ void setup()
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
   
-  #if defined ( SRAM )
-    spiram.Setup() ;                                   // Yes, do set-up
-    emptyring() ;                                      // Empty the buffer
-  #else
+  #if not defined ( SRAM )
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
     dbgprint ( "External buffer: Address %p, free %d\n",
                                     ringbuf, ESP.getFreeHeap() ) ;
@@ -1544,7 +1550,7 @@ void setup()
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;              // And sketch info
 #if defined ( IR )
-  setupIR( IR_PIN ) ;
+  setupIR() ;
 #endif
   vs1053player.begin() ;                               // Initialize VS1053 player
   if ( vs1053player.getChipVersion() == 4 )            // Check if we are using VS1053B chip
@@ -1556,6 +1562,13 @@ void setup()
   displayinfo ( "      Esp-radio     ", 0 ) ;
   delay ( 10 ) ;
   displayinfo ( "       Loading      ", 2 ) ;
+#endif
+#if defined ( SRAM )
+  spiram.Setup() ;                                     // Yes, do set-up
+  spiram.Test() ;                                      // Run simple SPIRAM test
+  delay ( 10 ) ;
+  displayinfo ( "SPI RAM test running", 3 ) ;
+  emptyring() ;                                        // Empty the buffer
 #endif
   delay ( 10 ) ;
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
@@ -1611,23 +1624,6 @@ void setup()
   {
     gettime() ;                                        // Sync time
   }
-  #if defined ( SRAM )
-    dbgprint ( "Testing SPIRAM getring/putring" ) ;
-    for ( int i = 0 ; i < 96 ; i++ )                   // Test for 96 bytes, 3 chunks
-    {
-      putring ( i ) ;                                  // Store in spiram
-      dbgprint ( "Test 1: %d, chunks avl is %d",       // Test, expect 0,0 1,0 2,0 .... 95,3
-                i, ringavail() ) ;
-    }
-    for ( int i = 0 ; i < 96 ; i++ )                   // Test for 100 bytes
-    {
-      uint8_t c = getring() ;                          // Read from spiram
-      dbgprint ( "Test 2: %d, data is %d, ch av is %d",
-                i, c, ringavail() ) ;                  // Test, expect 0,0,2 1,1,2 2,2,2 .... 95,95,0
-    }
-    dbgprint ( "Chunks avl is %d",                     // Test, expect 0
-              ringavail() ) ;
-  #endif
 }
 
 
@@ -2007,12 +2003,12 @@ void handlebyte ( uint8_t b, bool force )
         if ( lcml.startsWith ( "location: " ) )        // Redirection?
         {
           redirection = true ;
-          if ( lcml.indexOf ( "http://" ) > 8 )        // Redirection with http://?
+          if ( lcml.indexOf ( "http://" ) > 8 )        // Redirection with http:// ?
           {
             host = metaline.substring ( 17 ) ;         // Yes, get new URL
             hostreq = true ;
           }
-          else if ( lcml.indexOf ( "https://" ) )      // Redirection with https://?
+          else if ( lcml.indexOf ( "https://" ) )      // Redirection with https:// ?
           {
             host = metaline.substring ( 18 ) ;         // Yes, get new URL
             hostreq = true ;
