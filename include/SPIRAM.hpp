@@ -7,12 +7,12 @@
 
 #include "SPI.h"
 
-#define SRAM_CS       PIN_SPI_SS                      // CS pin connected to GPIO 15
-#define SRAM_FREQ     20e6                            // 23LC1024 supports theorically up to 20MHz
-#define SRAM_SIZE     131072                          // Total size SPI RAM in bytes
-#define CHUNKSIZE     32                              // Chunk size
-#define SRAM_CH_SIZE  4096                            // Total size SPI RAM in chunks
-#define SPIRAMDELAY   SRAM_SIZE                       // Delay before reading from SPIRAM
+#define SRAM_CS       PIN_SPI_SS                        // CS pin connected to GPIO 15
+#define SRAM_FREQ     20e6                              // 23LC1024 supports theorically up to 20MHz
+#define SRAM_SIZE     131072                            // Total size SPI RAM in bytes
+#define CHUNKSIZE     32                                // Chunk size
+#define SRAM_CH_SIZE  4096                              // Total size SPI RAM in chunks
+#define SPIRAMDELAY   SRAM_SIZE                         // Delay before reading from SPIRAM
 
 extern char* dbgprint ( const char* format, ... ) ;
 
@@ -21,9 +21,9 @@ class SPIRAM
   public:
                       SPIRAM() ;
                       SPIRAM ( uint8_t cs, uint8_t clockspeedhz ) ;
-    uint8_t           prcwinx ;                             // Index in pwchunk (see putring)
-    uint8_t           prcrinx ;                             // Index in prchunk (see getring)
-    int32_t           spiramdelay = SPIRAMDELAY ;           // Delay before reading from SPIRAM
+    uint8_t           prcwinx ;                         // Index in pwchunk (see putring)
+    uint8_t           prcrinx ;                         // Index in prchunk (see getring)
+    int32_t           spiramdelay = SPIRAMDELAY ;       // Delay before reading from SPIRAM
     void              Setup() ;
     void              Test() ;
     void              bufferReset() ;
@@ -35,9 +35,9 @@ class SPIRAM
   private:
     uint8_t           Cs ;
     uint32_t          clkSpeed ;
-    uint16_t          chcount ;                             // Number of chunks currently in buffer
-    uint32_t          readinx ;                             // Read index
-    uint32_t          writeinx ;                            // write index
+    uint16_t          chcount ;                         // Number of chunks currently in buffer
+    uint32_t          readinx ;                         // Read index
+    uint32_t          writeinx ;                        // write index
     void              Read   ( uint32_t addr, uint8_t *buff, uint32_t size ) ;
     void              Write  ( uint32_t addr, uint8_t *buff, uint32_t size ) ;
 };
@@ -56,14 +56,14 @@ void SPIRAM::Write ( uint32_t addr, uint8_t* buff, uint32_t size )
   SPI.beginTransaction ( SPISettings(SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
   digitalWrite ( SRAM_CS, LOW ) ;
 
-  SPI.transfer ( 0x02 ) ;                                     // Transfer write command
-  SPI.transfer ( ( addr >> 16 ) & 0xFF ) ;                    // MSB of the address
+  SPI.transfer ( 0x02 ) ;                               // Transfer write command
+  SPI.transfer ( ( addr >> 16 ) & 0xFF ) ;              // MSB of the address
   SPI.transfer ( ( addr >> 8) & 0xFF ) ;
-  SPI.transfer ( addr & 0xFF ) ;                              // LSB of the address
+  SPI.transfer ( addr & 0xFF ) ;                        // LSB of the address
 
   while ( size-- )
   {
-    SPI.transfer ( *buff++ ) ;                                // Transfer data
+    SPI.transfer ( *buff++ ) ;                          // Transfer data
   }
 
   digitalWrite ( SRAM_CS, HIGH ) ;
@@ -75,14 +75,14 @@ void SPIRAM::Read ( uint32_t addr, uint8_t* buff, uint32_t size )
   SPI.beginTransaction ( SPISettings(SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
   digitalWrite ( SRAM_CS, LOW ) ;
 
-  SPI.transfer ( 0x03 ) ;                                     // Transfer read command
-  SPI.transfer ( ( addr >> 16) & 0xFF ) ;                     // MSB of the address
+  SPI.transfer ( 0x03 ) ;                               // Transfer read command
+  SPI.transfer ( ( addr >> 16) & 0xFF ) ;               // MSB of the address
   SPI.transfer ( ( addr >> 8) & 0xFF ) ;
-  SPI.transfer ( addr & 0xFF ) ;                              // LSB of the address
+  SPI.transfer ( addr & 0xFF ) ;                        // LSB of the address
 
   while ( size-- )
   {
-    *buff++ = SPI.transfer ( 0x00 ) ;                         // Receive data
+    *buff++ = SPI.transfer ( 0x00 ) ;                   // Receive data
   }
 
   digitalWrite ( SRAM_CS, HIGH ) ;
@@ -145,9 +145,9 @@ void SPIRAM::bufferWrite ( uint8_t *b )
 //******************************************************************************************
 void SPIRAM::bufferRead ( uint8_t *b )
 {
-  Read ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;         // Return next chunk
-  readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
-  chcount-- ;                                          // Count is now one less
+  Read ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;          // Return next chunk
+  readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;            // Increment and wrap if necessary
+  chcount-- ;                                           // Count is now one less
 }
 
 
@@ -156,7 +156,7 @@ void SPIRAM::bufferRead ( uint8_t *b )
 //******************************************************************************************
 void SPIRAM::bufferReset()
 {
-  readinx = 0 ;                                        // Reset ringbuffer administration
+  readinx = 0 ;                                         // Reset ringbuffer administration
   writeinx = 0 ;
   chcount = 0 ;
 }
@@ -195,13 +195,14 @@ void SPIRAM::Setup()
 
   SPI.beginTransaction ( SPISettings ( clkSpeed, MSBFIRST, SPI_MODE0 ) ) ;
   digitalWrite ( Cs, LOW ) ;
-  SPI.transfer ( 0x01 ) ;                             // Write mode register
-  SPI.transfer ( 0x40 ) ;                             // Set seq mode
+  SPI.transfer ( 0x01 ) ;                               // Write mode register
+  SPI.transfer ( 0x40 ) ;                               // Set seq mode
   digitalWrite ( Cs, HIGH ) ;
   SPI.endTransaction();
 
-  bufferReset() ;                                     // Reset ringbuffer administration
+  bufferReset() ;                                       // Reset ringbuffer administration
 }
+
 
 //******************************************************************************************
 //                                S P I R A M T E S T                                      *
@@ -211,8 +212,8 @@ void SPIRAM::Test()
   uint8_t writeData[CHUNKSIZE] = { 0xDE, 0xAD, 0xBE, 0xEF } ;
   uint8_t readData[CHUNKSIZE] = { 0x00 } ;
 
-  bufferWrite ( writeData ) ;                         // Write to SPIRAM
-  bufferRead ( readData ) ;                           // Read from SPIRAM
+  bufferWrite ( writeData ) ;                           // Write to SPI RAM
+  bufferRead ( readData ) ;                             // Read from SPI RAM
 
   bool match = true ;
   for ( int i = 0; i < CHUNKSIZE; ++i )
