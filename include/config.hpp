@@ -1,5 +1,5 @@
 //
-#define VERSION "Sun, 1 Sep 2024 22:10:00 GMT"
+#define VERSION "Thu, 22 Sep 2024 22:50:00 GMT"
 //
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
 // Not that the password of an AP must be at least as long as 8 characters.
@@ -45,9 +45,9 @@ uint16_t ir_stop    = 0xB04F ; // #
 uint16_t ir_play    = 0x6897 ; // *
 uint16_t ir_volup   = 0x18E7 ;
 uint16_t ir_voldown = 0x4AB5 ;
-uint16_t ir_mute    = 0x38C7 ;
-uint16_t ir_next    = 0x5AA5 ;
-uint16_t ir_prev    = 0x10EF ;
+uint16_t ir_mute    = 0x38C7 ; // OK
+uint16_t ir_next    = 0x5AA5 ; // ->
+uint16_t ir_prev    = 0x10EF ; // <-
 //
 // Digital I/O pins used for VS1053 module
 #define VS1053_CS     0
