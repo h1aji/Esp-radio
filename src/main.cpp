@@ -1492,10 +1492,7 @@ void setup()
   Serial.println() ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
   
-  #if defined ( SRAM )
-    spiram.Setup() ;                                   // Yes, do set-up
-    emptyring() ;                                      // Empty the buffer
-  #else
+  #if not defined ( SRAM )
     ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
     dbgprint ( "External buffer: Address %p, free %d\n",
                                     ringbuf, ESP.getFreeHeap() ) ;
@@ -1566,6 +1563,13 @@ void setup()
   delay ( 10 ) ;
   displayinfo ( "       Loading      ", 2 ) ;
 #endif
+#if defined ( SRAM )
+  spiram.Setup() ;                                     // Yes, do set-up
+  spiram.Test() ;                                      // Run simple SPIRAM test
+  delay ( 10 ) ;
+  displayinfo ( "SPI RAM test running", 3 ) ;
+  emptyring() ;                                        // Empty the buffer
+#endif
   delay ( 10 ) ;
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
   tckr.attach ( 0.100, timer100 ) ;                    // Every 100 msec
@@ -1620,23 +1624,6 @@ void setup()
   {
     gettime() ;                                        // Sync time
   }
-  #if defined ( SRAM )
-    dbgprint ( "Testing SPIRAM getring/putring" ) ;
-    for ( int i = 0 ; i < 96 ; i++ )                   // Test for 96 bytes, 3 chunks
-    {
-      putring ( i ) ;                                  // Store in spiram
-      dbgprint ( "Test 1: %d, chunks avl is %d",       // Test, expect 0,0 1,0 2,0 .... 95,3
-                i, ringavail() ) ;
-    }
-    for ( int i = 0 ; i < 96 ; i++ )                   // Test for 100 bytes
-    {
-      uint8_t c = getring() ;                          // Read from spiram
-      dbgprint ( "Test 2: %d, data is %d, ch av is %d",
-                i, c, ringavail() ) ;                  // Test, expect 0,0,2 1,1,2 2,2,2 .... 95,95,0
-    }
-    dbgprint ( "Chunks avl is %d",                     // Test, expect 0
-              ringavail() ) ;
-  #endif
 }
 
 

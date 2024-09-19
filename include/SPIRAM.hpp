@@ -8,11 +8,13 @@
 #include "SPI.h"
 
 #define SRAM_CS       PIN_SPI_SS                      // CS pin connected to GPIO 15
-#define SRAM_FREQ     20000000                        // 23LC1024 supports theorically up to 20MHz
+#define SRAM_FREQ     20e6                            // 23LC1024 supports theorically up to 20MHz
 #define SRAM_SIZE     131072                          // Total size SPI RAM in bytes
 #define CHUNKSIZE     32                              // Chunk size
 #define SRAM_CH_SIZE  4096                            // Total size SPI RAM in chunks
-#define SPIRAMDELAY   100000                          // Delay (in bytes) before reading from SPIRAM
+#define SPIRAMDELAY   SRAM_SIZE                       // Delay before reading from SPIRAM
+
+extern char* dbgprint ( const char* format, ... ) ;
 
 class SPIRAM
 {
@@ -23,6 +25,7 @@ class SPIRAM
     uint8_t           prcrinx ;                             // Index in prchunk (see getring)
     int32_t           spiramdelay = SPIRAMDELAY ;           // Delay before reading from SPIRAM
     void              Setup() ;
+    void              Test() ;
     void              bufferReset() ;
     bool              spaceAvailable() ;
     uint16_t          dataAvailable() ;
@@ -35,8 +38,8 @@ class SPIRAM
     uint16_t          chcount ;                             // Number of chunks currently in buffer
     uint32_t          readinx ;                             // Read index
     uint32_t          writeinx ;                            // write index
-    void              spiramRead   ( uint32_t addr, uint8_t *buff, uint32_t size ) ;
-    void              spiramWrite  ( uint32_t addr, uint8_t *buff, uint32_t size ) ;
+    void              Read   ( uint32_t addr, uint8_t *buff, uint32_t size ) ;
+    void              Write  ( uint32_t addr, uint8_t *buff, uint32_t size ) ;
 };
 
 
@@ -48,51 +51,42 @@ SPIRAM spiram ;
 //******************************************************************************************
 // Use SPI RAM as a circular buffer with chunks of 32 bytes.                               *
 //******************************************************************************************
-void SPIRAM::spiramWrite ( uint32_t addr, uint8_t *buff, uint32_t size )
+void SPIRAM::Write ( uint32_t addr, uint8_t* buff, uint32_t size )
 {
-  int i = 0;
   SPI.beginTransaction ( SPISettings(SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+  digitalWrite ( SRAM_CS, LOW ) ;
+
+  SPI.transfer ( 0x02 ) ;                                     // Transfer write command
+  SPI.transfer ( ( addr >> 16 ) & 0xFF ) ;                    // MSB of the address
+  SPI.transfer ( ( addr >> 8) & 0xFF ) ;
+  SPI.transfer ( addr & 0xFF ) ;                              // LSB of the address
+
   while ( size-- )
   {
-    digitalWrite ( SRAM_CS, LOW ) ;
-
-    uint32_t data = ( 0x02 << 24 ) | (addr++ & 0x00ffffff ) ;
-    SPI.transfer16 ( data >> 16 ) ;       // Transfer MSB
-    SPI.transfer16 ( data & 0xFFFF ) ;    // Transfer LSB
-    SPI.transfer ( buff[i++] ) ;
-
-    digitalWrite ( SRAM_CS, HIGH ) ;
-
-    if (i % CHUNKSIZE == 0)
-    {
-      yield() ;                           // Yield to reset the watchdog every 32 iterations
-    }
+    SPI.transfer ( *buff++ ) ;                                // Transfer data
   }
 
-  SPI.endTransaction();
+  digitalWrite ( SRAM_CS, HIGH ) ;
+  SPI.endTransaction() ;
 }
 
-void SPIRAM::spiramRead ( uint32_t addr, uint8_t *buff, uint32_t size )
+void SPIRAM::Read ( uint32_t addr, uint8_t* buff, uint32_t size )
 {
-  int i = 0;
   SPI.beginTransaction ( SPISettings(SRAM_FREQ, MSBFIRST, SPI_MODE0 ) ) ;
+  digitalWrite ( SRAM_CS, LOW ) ;
+
+  SPI.transfer ( 0x03 ) ;                                     // Transfer read command
+  SPI.transfer ( ( addr >> 16) & 0xFF ) ;                     // MSB of the address
+  SPI.transfer ( ( addr >> 8) & 0xFF ) ;
+  SPI.transfer ( addr & 0xFF ) ;                              // LSB of the address
+
   while ( size-- )
   {
-    digitalWrite ( SRAM_CS, LOW ) ;
-
-    uint32_t data = ( 0x03 << 24 ) | ( addr++ & 0x00ffffff ) ;
-    SPI.transfer16 ( data >> 16 ) ;       // Transfer MSB
-    SPI.transfer16 ( data & 0xFFFF ) ;    // Transfer LSB
-    buff[i++] = SPI.transfer ( 0x00 ) ;
-
-    digitalWrite ( SRAM_CS, HIGH ) ;
-
-    if (i % CHUNKSIZE == 0)
-    {
-      yield() ;                           // Yield to reset the watchdog every 32 iterations
-    }
+    *buff++ = SPI.transfer ( 0x00 ) ;                         // Receive data
   }
-  SPI.endTransaction();
+
+  digitalWrite ( SRAM_CS, HIGH ) ;
+  SPI.endTransaction() ;
 }
 
 
@@ -137,7 +131,7 @@ uint16_t SPIRAM::getFreeBufferSpace()
 //******************************************************************************************
 void SPIRAM::bufferWrite ( uint8_t *b )
 {
-  spiramWrite ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ;  // Put byte in SRAM
+  Write ( writeinx * CHUNKSIZE, b, CHUNKSIZE ) ;        // Put byte in SPIRAM
   writeinx = ( writeinx + 1 ) % SRAM_CH_SIZE ;          // Increment and wrap if necessary
   chcount++ ;                                           // Count number of chunks
 }
@@ -151,7 +145,7 @@ void SPIRAM::bufferWrite ( uint8_t *b )
 //******************************************************************************************
 void SPIRAM::bufferRead ( uint8_t *b )
 {
-  spiramRead ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;   // return next chunk
+  Read ( readinx * CHUNKSIZE, b, CHUNKSIZE ) ;         // Return next chunk
   readinx = ( readinx + 1 ) % SRAM_CH_SIZE ;           // Increment and wrap if necessary
   chcount-- ;                                          // Count is now one less
 }
@@ -181,8 +175,8 @@ SPIRAM::SPIRAM()
 
 SPIRAM::SPIRAM ( uint8_t cs, uint8_t clockspeedhz )
 {
-  Cs = cs;
-  clkSpeed = clockspeedhz;
+  Cs = cs ;
+  clkSpeed = clockspeedhz ;
 }
 
 
@@ -191,7 +185,7 @@ SPIRAM::SPIRAM ( uint8_t cs, uint8_t clockspeedhz )
 //******************************************************************************************
 void SPIRAM::Setup()
 {
-  SPI.begin();
+  SPI.begin() ;
   pinMode ( Cs, OUTPUT ) ;
   digitalWrite ( Cs, HIGH ) ;
   delay ( 50 ) ;
@@ -202,9 +196,40 @@ void SPIRAM::Setup()
   SPI.beginTransaction ( SPISettings ( clkSpeed, MSBFIRST, SPI_MODE0 ) ) ;
   digitalWrite ( Cs, LOW ) ;
   SPI.transfer ( 0x01 ) ;                             // Write mode register
-  SPI.transfer ( 0x00 ) ;                             // Set byte mode
+  SPI.transfer ( 0x40 ) ;                             // Set seq mode
   digitalWrite ( Cs, HIGH ) ;
   SPI.endTransaction();
 
   bufferReset() ;                                     // Reset ringbuffer administration
+}
+
+//******************************************************************************************
+//                                S P I R A M T E S T                                      *
+//******************************************************************************************
+void SPIRAM::Test()
+{
+  uint8_t writeData[CHUNKSIZE] = { 0xDE, 0xAD, 0xBE, 0xEF } ;
+  uint8_t readData[CHUNKSIZE] = { 0x00 } ;
+
+  bufferWrite ( writeData ) ;                         // Write to SPIRAM
+  bufferRead ( readData ) ;                           // Read from SPIRAM
+
+  bool match = true ;
+  for ( int i = 0; i < CHUNKSIZE; ++i )
+  {
+    if ( readData[i] != writeData[i] )
+    {
+      match = false ;
+      break ;
+    }
+  }
+
+  if ( match )
+  {
+    dbgprint ( "SPI RAM detected and functioning correctly" ) ;
+  }
+  else
+  {
+    dbgprint ( "Failed to verify SPI RAM. Check connections and settings" ) ;
+  }
 }
