@@ -177,10 +177,6 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 //******************************************************************************************
 
 
-// The object for the MP3 player
-VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ, VS1053_RST ) ;
-
-
 //******************************************************************************************
 // Pages and CSS for the webinterface.                                                     *
 //******************************************************************************************
@@ -309,7 +305,6 @@ void gettime()
       {
         dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
       }
-      dbgprint ( "Sync TOD" ) ;
       if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
       {
         dbgprint ( "Failed to obtain time!" ) ;             // Error
@@ -1565,7 +1560,7 @@ void setup()
 #endif
 #if defined ( SRAM )
   spiram.Setup() ;                                     // Yes, do set-up
-  spiram.Test() ;                                      // Run simple SPIRAM test
+  spiram.Test() ;                                      // Run simple SRAM test
   delay ( 10 ) ;
   displayinfo ( "SPI RAM test running", 3 ) ;
   emptyring() ;                                        // Empty the buffer
@@ -2585,7 +2580,7 @@ const char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-  #if defined ( SRAM )                                // SPI RAM used?
+  #if defined ( SRAM )                              // SPI RAM used?
     rcount = spiram.dataAvailable() ;                 // Yes, get free space
   #endif
     if ( mp3client )

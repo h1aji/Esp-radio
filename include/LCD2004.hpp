@@ -1,5 +1,5 @@
 //***************************************************************************************************
-//   LCD2004.h - Driver for LCD 2004 display with I2C backpack.                                     *
+//   LCD2004.hpp - Driver for LCD 2004 display with I2C backpack.                                   *
 //***************************************************************************************************
 // The backpack communicates with the I2C bus and converts the serial data to parallel for the      *
 // 2004 board.                                                                                      *

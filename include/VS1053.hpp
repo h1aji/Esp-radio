@@ -1,12 +1,18 @@
 //******************************************************************************************
-// VS1053 stuff.  Based on maniacbug library.                                              *
+// VS1053.hpp - Driver for VS1053 audio decoder boaard.                                    *
 //******************************************************************************************
-// VS1053 class definition.                                                                *
+//                                                                                         *
 //******************************************************************************************
 //
 
 #include "SPI.h"
 #include "vs1053b-patches.h"
+//
+// Digital I/O pins used for VS1053 module
+#define VS1053_CS     0
+#define VS1053_DCS    16
+#define VS1053_DREQ   9
+#define VS1053_RST    10
 
 extern char* dbgprint ( const char* format, ... ) ;
 
@@ -114,6 +120,9 @@ class VS1053
     void loadDefaultVs1053Patches();                     // Loads the latest generic firmware patch.
 
 } ;
+
+VS1053 vs1053player ( VS1053_CS, VS1053_DCS, 
+                      VS1053_DREQ, VS1053_RST ) ;        // The object for the MP3 player
 
 VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t _rst_pin ) :
   cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin), rst_pin(_rst_pin)
