@@ -167,6 +167,8 @@ void SPIRAM::bufferReset()
   readinx = 0 ;
   writeinx = 0 ;
   chcount = 0 ;
+  prcwinx = 0 ;
+  prcrinx = 32 ;
 }
 
 
@@ -179,12 +181,16 @@ SPIRAM::SPIRAM()
 {
   Cs = SPIRAM_CS ;
   clkSpeed = SPIRAM_FREQ ;
+  prcwinx = 0 ;                                          // Initialize write index
+  prcrinx = 32 ;                                         // Initialize read index (32 = empty)
 }
 
 SPIRAM::SPIRAM ( uint8_t cs, uint8_t clockspeedhz )
 {
   Cs = cs ;
   clkSpeed = clockspeedhz ;
+  prcwinx = 0 ;                                          // Initialize write index
+  prcrinx = 32 ;                                         // Initialize read index (32 = empty)
 }
 
 
