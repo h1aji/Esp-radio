@@ -94,6 +94,7 @@ struct ini_struct
   int8_t         clk_dst ;                                 // Number of hours shift during DST
   String         ssid ;                                    // SSID of WiFi network to connect to
   String         passwd ;                                  // Password for WiFi network
+  String         wifi_mode ;                               // WiFi mode
 } ;
 
 enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,
@@ -898,9 +899,25 @@ bool connectwifi()
 {
   char*  pfs ;                                         // Pointer to formatted string
 
-  WiFi.mode ( WIFI_STA ) ;                            // Set ESP8266 as a station
-  WiFi.disconnect ( true ) ;                          // Disconnect from any previous connections
-  delay ( 1000 );
+  WiFi.mode ( WIFI_OFF ) ;                             // Turn off WiFi first
+  delay ( 100 ) ;                                      // Wait for radio to stabilize
+  WiFi.mode ( WIFI_STA ) ;                             // Set ESP8266 as a station
+
+  WiFi.disconnect ( false ) ;                          // Disconnect without turning off radio
+  delay ( 500 ) ;
+
+  if ( ini_block.wifi_mode.equals ( "b" ) )
+  {
+    WiFi.setPhyMode ( WIFI_PHY_MODE_11B ) ;            // Enable 802.11b mode
+  } 
+  else if ( ini_block.wifi_mode.equals ( "g" ) )
+  {
+    WiFi.setPhyMode ( WIFI_PHY_MODE_11G ) ;            // Enable 802.11g mode
+  }
+  else
+  {
+    WiFi.setPhyMode ( WIFI_PHY_MODE_11N ) ;            // Enable 802.11n mode
+  }
 
   WiFi.begin ( ini_block.ssid.c_str(),
                ini_block.passwd.c_str() ) ;            // Connect to selected SSID
@@ -909,8 +926,14 @@ bool connectwifi()
   unsigned long startTime = millis();                  // Custom Wi-Fi connection loop with timeout
   const unsigned long timeout = 10000;                 // 10 seconds timeout
   
-  while ( WiFi.status() != WL_CONNECTED && millis() - startTime < timeout )
+  while ( WiFi.status() != WL_CONNECTED )
   {
+    if ( millis() - startTime > timeout )              // Check timeout separately to avoid overflow issues
+    {
+      dbgprint ( "WiFi timeout after %lu ms", timeout ) ;
+      break ;
+    }
+    
     delay ( 500 ) ;                                    // Yield time for background tasks
     ESP.wdtFeed() ;                                    // Feed the watchdog to prevent WDT reset
     Serial.print ( "." ) ;
@@ -927,22 +950,25 @@ bool connectwifi()
                     WiFi.localIP()[3] ) ;
     displayinfo ( pfs, 3 ) ;                           // Show IP address on display
     return true;
-  } else {
-    // Failed to connect, switch to AP mode
-    dbgprint ( "WiFi Failed! Trying to setup AP with name %s", NAME );
+  } 
+  else 
+  {
+    uint8_t status = WiFi.status() ;
+    dbgprint ( "WiFi Failed! Status: %d", status ) ;   // Failed to connect, show why
+    dbgprint ( "Trying to setup AP with name %s", NAME ) ;
 
     boolean res = WiFi.softAP ( NAME, NULL ) ;         // Set up Access Point mode
 
     if ( res == true )
     {
-      dbgprint ( "WIFI Access Point is Ready" );
+      dbgprint ( "WIFI Access Point is Ready" ) ;
     }
     else
     {
-      dbgprint ( "WIFI Access Point Failed to Setup!" );
+      dbgprint ( "WIFI Access Point Failed to Setup!" ) ;
     }
 
-    delay ( 5000 ) ;
+    delay ( 1000 ) ;
     pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Display AP mode IP address
     displayinfo ( "* AP mode activated", 2 ) ;
     return false ;
@@ -957,6 +983,9 @@ bool connectwifi()
 //******************************************************************************************
 void otastart()
 {
+  const char* reply ;                                  // Result of analyzeCmd
+  reply = analyzeCmd ("stop") ;
+  dbgprint ( reply ) ;
   dbgprint ( "OTA Started" ) ;
 }
 
@@ -1482,6 +1511,7 @@ void setup()
   Dir         dir ;                                    // Directory struct for LittleFS
   File        f ;                                      // Filehandle
   String      filename ;                               // Name of file found in LittleFS
+  char*       pfs ;                                    // Pointer to formatted string
 
   Serial.begin ( 115200 ) ;                            // For debug
   Serial.println() ;
@@ -1499,6 +1529,7 @@ void setup()
   xml.init ( xmlbuffer, sizeof(xmlbuffer),             // Initilize XML stream.
              &XML_callback ) ;
   //memset ( &ini_block, 0, sizeof(ini_block) ) ;      // Init ini_block
+  ini_block.wifi_mode = "n" ;                          // Set WiFi mode to N
   ini_block.mqttbroker = "" ;
   ini_block.mqttport   = 1883 ;                        // Default port for MQTT
   ini_block.mqttuser   = "" ;
@@ -1560,15 +1591,18 @@ void setup()
 #endif
 #if defined ( SRAM )
   spiram.Setup() ;                                     // Yes, do set-up
-  spiram.Test() ;                                      // Run simple SRAM test
   delay ( 10 ) ;
   displayinfo ( "SPI RAM test running", 3 ) ;
+  spiram.Test() ;                                      // Run simple SRAM test
+  delay ( 1000 ) ;
   emptyring() ;                                        // Empty the buffer
 #endif
   delay ( 10 ) ;
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
   tckr.attach ( 0.100, timer100 ) ;                    // Every 100 msec
   dbgprint ( "Selected network: %-25s", ini_block.ssid.c_str() ) ;
+  pfs = dbgprint ( "Connecting to: %-25s", ini_block.ssid.c_str() ) ;
+  displayinfo ( pfs, 3 ) ;                             // Show WiFi network on display
   NetworkFound = connectwifi() ;                       // Connect to WiFi network
   //NetworkFound = false ;                             // TEST, uncomment for no network test
   dbgprint ( "Start server for commands" ) ;
@@ -1581,6 +1615,7 @@ void setup()
     ArduinoOTA.setHostname ( NAME ) ;                  // Set the hostname
     ArduinoOTA.onStart ( otastart ) ;
     ArduinoOTA.begin() ;                               // Allow update over the air
+
     if ( ini_block.mqttbroker.length() )               // Broker specified?
     {
       // Initialize the MQTT client
@@ -2065,6 +2100,11 @@ void handlebyte ( uint8_t b, bool force )
         if ( redirection )                             // Redirect seen?
         {
            datamode = INIT ;
+           stop_mp3client() ;                          // Stop old connection
+           emptyring() ;                               // Clear the ringbuffer/SPIRAM of old data
+        #if defined ( SRAM )
+           spiram.spiramdelay = 0 ;                    // Reset delay to resume data processing
+        #endif
         }
       }
     }
@@ -2580,7 +2620,7 @@ const char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-  #if defined ( SRAM )                              // SPI RAM used?
+  #if defined ( SRAM )                                // SPI RAM used?
     rcount = spiram.dataAvailable() ;                 // Yes, get free space
   #endif
     if ( mp3client )
