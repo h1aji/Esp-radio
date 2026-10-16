@@ -1590,8 +1590,13 @@ void setup()
   displayinfo ( "      Esp-radio     ", 0 ) ;
   delay ( 10 ) ;
   displayinfo ( "       Loading      ", 2 ) ;
-#elif defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )  
-  dsp_setRotation ( OLED_ROTATION ) ;
+#elif defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
+  dsp_begin() ;
+  if ( tft )                                           // Display actually found?
+  {
+    dsp_setRotation ( OLED_ROTATION ) ;
+  }
+  displaysplash() ;
 #endif
 #if defined ( SRAM )
   spiram.Setup() ;                                     // Yes, do set-up
@@ -1809,7 +1814,7 @@ void loop()
       time_req = false ;                               // Yes, clear request
       if ( NetworkFound )                              // Time available?
       {
-        displaytime ( timetxt ) ;                      // Write to TFT screen
+        displaytime ( timetxt ) ;                      // Write to OLED screen
       }
       displayvolume ( vs1053player.getVolume() ) ;     // Show volume on display
     }

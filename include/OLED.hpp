@@ -17,6 +17,10 @@
   #define OLEDTYP 1306
 #endif
 
+#ifndef OLED_ROTATION
+  #define OLED_ROTATION 0                           // Default: no rotation
+#endif
+
 
 #define SCREEN_WIDTH        128                    // OLED display width, in pixels
 #define SCREEN_HEIGHT        64                    // OLED display height, in pixels
@@ -61,7 +65,7 @@ struct page_struct
 
 void displaybattery ( uint16_t bat0, uint16_t bat100, uint16_t adcval ) ;
 void displaytime ( const char* str, uint16_t color = 0xFFFF ) ;
-bool dsp_begin ( int8_t sda_pin, int8_t scl_pin, uint16_t olt ) ;
+bool dsp_begin () ;
 void displayvolume  ( uint8_t vol ) ;
 
 // Control byte
@@ -228,6 +232,7 @@ class OLED
                          uint8_t color ) ;
     void      setRotation ( uint16_t rotation ) ;     // Rotation
     uint8_t   getRotation() ;                         //
+    bool      found = false ;                         // True if display was detected on I2C bus
   private:
     struct page_struct*     ssdbuf = NULL ;
     const  uint8_t*         font ;                    // Font to use
@@ -242,11 +247,18 @@ OLED*        tft ;                                    // Object for display
 
 bool dsp_begin()
 {
+  oledtyp = OLEDTYP ;                                    // Remember configured OLED type
   dbgprint ( "Init OLED LCD: SDA GPIO %d, SCL GPIO %d",
                                 PIN_WIRE_SDA, PIN_WIRE_SCL ) ;
   if ( ( PIN_WIRE_SDA == 4 ) && ( PIN_WIRE_SCL == 5 ) )  // Make sure correct pins are used
   {
     tft = new OLED ( PIN_WIRE_SDA, PIN_WIRE_SCL ) ;      // Create an instance for LCD
+    if ( ! tft->found )                                  // Display actually detected on I2C bus?
+    {
+      dbgprint ( "Init OLED failed, no device found!" ) ;
+      delete tft ;                                       // No, give up
+      tft = NULL ;
+    }
   }
   else
   {
@@ -483,6 +495,7 @@ OLED::OLED ( int8_t sda, int8_t scl )
   Wire.beginTransmission ( OLED_I2C_ADDRESS ) ;              // Begin transmission
   Wire.write ( initbuf, sizeof(initbuf) ) ;                  // Write init buffer
   Wire.endTransmission() ;                                   // End of transmission
+  found = true ;                                             // Display is present and initialized
   clear() ;                                                  // Clear the display
 }
 
@@ -679,5 +692,43 @@ void displayinfo ( const char *str, int pos )
       dsp_setCursor ( 0, y_position ) ;
       dsp_println ( buf ) ;
     }
+  }
+}
+
+
+//******************************************************************************************
+//                            D I S P L A Y S P L A S H                                     *
+//******************************************************************************************
+// Show the boot splash screen: "Esp-Radio" on the first line, "Loading ..." on the third.  *
+// Strings are horizontally centered based on the OLED's actual character width.            *
+// (LCD2004-style pre-padded strings are centered for a 20-column display and do not        *
+// center correctly here, since this font fits a different number of characters per line.)  *
+//******************************************************************************************
+void displaysplash()
+{
+  struct { const char* str ; uint8_t pos ; } lines[] =
+                { { "Esp-Radio",   0 },
+                  { "Loading ...", 2 } } ;
+  const uint8_t cols = SCREEN_WIDTH / ( OLEDFONTWIDTH + 1 ) ;    // Characters that fit on a line
+  char          buf[40] ;                                        // Padded string
+
+  for ( uint8_t i = 0 ; i < 2 ; i++ )
+  {
+    size_t  len = strlen ( lines[i].str ) ;
+    uint8_t pad = ( cols > len ) ? ( cols - len ) / 2 : 0 ;       // Leading spaces needed
+
+    if ( pad > sizeof ( buf ) - 1 )                               // Safety clamp
+    {
+      pad = 0 ;
+    }
+    if ( len > sizeof ( buf ) - 1 - pad )
+    {
+      len = sizeof ( buf ) - 1 - pad ;
+    }
+    memset ( buf, ' ', pad ) ;
+    memcpy ( buf + pad, lines[i].str, len ) ;
+    buf[pad + len] = '\0' ;
+    displayinfo ( buf, lines[i].pos ) ;
+    delay ( 10 ) ;
   }
 }
