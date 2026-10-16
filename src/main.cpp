@@ -37,6 +37,8 @@ extern "C"
 //
 #if defined ( LCD )
   #include "LCD2004.hpp"
+#elif defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
+  #include "OLED.hpp"
 #else
 // Empty declaration
   #define displayinfo(a,b)
@@ -288,7 +290,7 @@ String utf8ascii ( const char* s )
 //**************************************************************************************************
 void gettime()
 {
-#if defined ( LCD )
+#if defined ( LCD ) || defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
 
@@ -836,8 +838,10 @@ bool connecttohost()
 
   stop_mp3client() ;                                // Disconnect if still connected
   // dbgprint ( "Connect to new host %s", host.c_str() ) ;
+#if defined ( LCD )
   displayinfo ( "** Internet radio **", 1 ) ;
   displaytime ( "" ) ;                              // Clear time on LCD screen
+#endif
 
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
@@ -1588,6 +1592,8 @@ void setup()
   displayinfo ( "      Esp-radio     ", 0 ) ;
   delay ( 10 ) ;
   displayinfo ( "       Loading      ", 2 ) ;
+#elif defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )  
+  dsp_setRotation ( OLED_ROTATION ) ;
 #endif
 #if defined ( SRAM )
   spiram.Setup() ;                                     // Yes, do set-up
@@ -1790,7 +1796,7 @@ void loop()
   {
     gettime() ;                                        // Yes, get the current time
   }
-  #if defined ( LCD )
+  #if defined ( LCD ) || defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
     if ( time_req )                                    // Time to refresh timetxt?
     {
       time_req = false ;                               // Yes, clear request

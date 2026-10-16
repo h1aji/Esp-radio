@@ -1,5 +1,5 @@
 //
-#define VERSION "Sat, 21 Sep 2024 16:00:00 GMT"
+#define VERSION "Mon, 9 Feb 2026 10:30:00 GMT"
 //
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
 // Not that the password of an AP must be at least as long as 8 characters.
@@ -26,6 +26,11 @@
 //
 // Define LCD if you are using LCD 2004
 #define LCD
+// Or specify OLED screen model
+//#define OLED1106
+//#define OLED1306
+//#define OLED1309
+//#define OLED_ROTATION   180    // 0=normal, 90=right, 180=upside-down, 270=left
 //
 // Enable support for Infra-red receiver by uncommenting the next line
 #define IR

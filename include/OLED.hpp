@@ -7,7 +7,7 @@
 
 #include <Wire.h>
 
-#ifdef OLED1309                           // Set type acoording to definition
+#ifdef OLED1309                                    // Set type acoording to definition
   #define OLEDTYP 1309
 #endif
 #ifdef OLED1106
@@ -18,7 +18,6 @@
 #endif
 
 
-#define OLED_I2C_ADDRESS   0x3C
 #define SCREEN_WIDTH        128                    // OLED display width, in pixels
 #define SCREEN_HEIGHT        64                    // OLED display height, in pixels
 #define DISPLAYTYPE      "OLED"
@@ -35,8 +34,7 @@
 #define WHITE   RED | GREEN | BLUE
 
 #define DEFTXTSIZ   1                              // Default text size
-
-#define OLED_NPAG    8                             // Number of pages (text lines)
+#define OLED_NPAG   8                              // Number of pages (text lines)
 
 // Data to display.  There are TFTSECS sections
 struct page_struct
@@ -45,45 +43,9 @@ struct page_struct
   bool      dirty ;                                // True if modified
 } ;
 
-struct scrseg_struct                               // For screen segments
-{
-  bool     update_req ;                            // Request update of screen
-  uint16_t color ;                                 // Textcolor
-  uint16_t y ;                                     // Begin of segment row
-  uint16_t height ;                                // Height of segment
-  String   str ;                                   // String to be displayed
-} ;
-
-class OLED
-{
-  public:
-              OLED ( int8_t sda, int8_t scl ) ;       // Constructor
-    void      clear() ;                               // Clear buffer
-    void      display() ;                             // Display buffer
-    void      print ( char c ) ;                      // Print a character
-    void      print ( const char* str ) ;             // Print a string
-    void      setCursor ( uint8_t x, uint8_t y ) ;    // Position the cursor
-    void      fillRect ( uint8_t x, uint8_t y,        // Fill a rectangle
-                         uint8_t w, uint8_t h,
-                         uint8_t color ) ;
-  private:
-    struct page_struct*     ssdbuf = NULL ;
-    const  uint8_t*         font ;                    // Font to use
-    uint8_t                 xchar = 0 ;               // Current cursor position (text)
-    uint8_t                 ychar = 0 ;               // Current cursor position (text)
-    void                    openI2Cchan() ;           // Open I2C channel
-    void                    closeI2Cchan() ;          // Close I2C channel
-    void                    wrI2Cchan ( uint8_t b ) ; // Send 1 byte to I2C buffer
-} ;
-
-#define TFTSECS   4
-#define tftdata   OLED_tftdata
-
-extern OLED*         tft ;                            // Object for display
-extern scrseg_struct OLED_tftdata[TFTSECS] ;          // Screen divided in segments
 
 // Various macro's to mimic the ST7735 version of display functions
-#define dsp_setRotation()                                          // Use standard landscape format
+#define dsp_setRotation(a)      tft->setRotation(a)                // Set rotation (0, 90, 180, 270)
 #define dsp_setTextSize(a)                                         // Set the text size
 #define dsp_setTextColor(a)
 #define dsp_print(a)            tft->print ( a )                   // Print a string 
@@ -138,6 +100,10 @@ void displayvolume  ( uint8_t vol ) ;
 
 // Charge Pump (pg.62)
 #define OLED_CMD_SET_CHARGE_PUMP        0x8D    // follow with 0x14
+
+// Rotation commands
+#define OLED_CMD_SET_SEGMENT_REMAP_INV  0xA1    // Segment remap inverted
+#define OLED_CMD_SET_COM_SCAN_MODE_INV  0xC8    // COM scan mode inverted
 
 const uint8_t OLEDFONTWIDTH = 5 ;
 const uint8_t OLEDfont[] =
@@ -245,27 +211,42 @@ const uint8_t OLEDfont[] =
             } ;
 
 
-extern char*  dbgprint ( const char* format, ... ) ;       // Print a formatted debug line
+extern char*  dbgprint ( const char* format, ... ) ;     // Print a formatted debug line
 extern void   utf8ascii_ip ( char* s ) ;
+
+class OLED
+{
+  public:
+              OLED ( int8_t sda, int8_t scl ) ;       // Constructor
+    void      clear() ;                               // Clear buffer
+    void      display() ;                             // Display buffer
+    void      print ( char c ) ;                      // Print a character
+    void      print ( const char* str ) ;             // Print a string
+    void      setCursor ( uint8_t x, uint8_t y ) ;    // Position the cursor
+    void      fillRect ( uint8_t x, uint8_t y,        // Fill a rectangle
+                         uint8_t w, uint8_t h,
+                         uint8_t color ) ;
+    void      setRotation ( uint16_t rotation ) ;     // Rotation
+    uint8_t   getRotation() ;                         //
+  private:
+    struct page_struct*     ssdbuf = NULL ;
+    const  uint8_t*         font ;                    // Font to use
+    uint8_t                 xchar = 0 ;               // Current cursor position (text)
+    uint8_t                 ychar = 0 ;               // Current cursor position (text)
+    byte                    OLED_I2C_ADDRESS ;        // Should be 0x3C
+} ;
+
 
 uint16_t     oledtyp ;                                // Type of OLED
 OLED*        tft ;                                    // Object for display
-scrseg_struct OLED_tftdata[TFTSECS] =                 // Screen divided in 3 segments + 1 overlay
-{                                                     // One text line is 8 pixels
-  { false, WHITE,   0,  8, "" },                      // 1 top line
-  { false, CYAN,    8, 32, "" },                      // 4 lines in the middle
-  { false, YELLOW, 40, 22, "" },                      // 3 lines at the bottom, leave room for indicator
-  { false, GREEN,  40, 22, "" }                       // 3 lines at the bottom for rotary encoder
-} ;
-
 
 bool dsp_begin()
 {
   dbgprint ( "Init OLED LCD: SDA GPIO %d, SCL GPIO %d",
                                 PIN_WIRE_SDA, PIN_WIRE_SCL ) ;
-  if ( ( PIN_WIRE_SDA == 4 ) && ( PIN_WIRE_SCL == 5 ) )       // Make sure correct pins are used
+  if ( ( PIN_WIRE_SDA == 4 ) && ( PIN_WIRE_SCL == 5 ) )  // Make sure correct pins are used
   {
-    tft = new OLED ( PIN_WIRE_SDA, PIN_WIRE_SCL ) ;        // Create an instance for LCD
+    tft = new OLED ( PIN_WIRE_SDA, PIN_WIRE_SCL ) ;      // Create an instance for LCD
   }
   else
   {
@@ -329,7 +310,7 @@ void OLED::display()
 
   if ( a )
   {
-    Serial.printf ( "I2C buf is %d\n", I2C_BUFFER_LENGTH ) ;
+    dbgprint ( "I2C buf is %d", I2C_BUFFER_LENGTH ) ;
     a = false ;
   }
   for ( pg = 0 ; pg < OLED_NPAG ; pg++ )
@@ -429,6 +410,35 @@ void OLED::fillRect ( uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color 
 }
 
 
+//**************************************************************************************************
+//                                          I 2 C S C A N                                          *
+//**************************************************************************************************
+// Utility to scan the I2C bus.                                                                    *
+//**************************************************************************************************
+byte i2cscan()
+{
+  byte error, address ;
+
+  dbgprint ( "Scanning I2C bus..." ) ;
+
+  for ( address = 1 ; address < 127 ; address++ )
+  {
+    Wire.beginTransmission ( address ) ;
+    error = Wire.endTransmission() ;
+    if ( error == 0 )
+    {
+      dbgprint ( "I2C device 0x%02X found", address ) ;
+      return address;                                   // Return the address of the found device
+    }
+    else if ( error == 4 )
+    {
+      dbgprint ( "Error 4 at address 0x%02X", address ) ;
+    }
+  }
+  return 0;                                             // Return 0 if no device is found
+}
+
+
 //***********************************************************************************************
 //                                O L E D constructor                                           *
 //***********************************************************************************************
@@ -459,11 +469,21 @@ OLED::OLED ( int8_t sda, int8_t scl )
                   } ;
   ssdbuf = (page_struct*) malloc ( 8 * sizeof(page_struct) ) ;  // Create buffer for screen
   font = OLEDfont ;
-  Wire.begin ( sda, scl ) ;                                     // Init I2c
-  Wire.beginTransmission ( OLED_I2C_ADDRESS ) ;                 // Begin transmission
-  Wire.write ( initbuf, sizeof(initbuf) ) ;                     // Write init buffer
-  Wire.endTransmission() ;                                      // End of transmission
-  clear() ;                                                     // Clear the display
+  Wire.begin ( sda, scl ) ;
+  delay ( 50 ) ;
+
+  OLED_I2C_ADDRESS = i2cscan() ;                             // Assign the found address to LCD_I2C_ADDRESS
+
+  if ( OLED_I2C_ADDRESS == 0 )
+  {
+    dbgprint ( "No I2C devices found." ) ;
+    return;                                                  // Exit if no device is found
+  }
+
+  Wire.beginTransmission ( OLED_I2C_ADDRESS ) ;              // Begin transmission
+  Wire.write ( initbuf, sizeof(initbuf) ) ;                  // Write init buffer
+  Wire.endTransmission() ;                                   // End of transmission
+  clear() ;                                                  // Clear the display
 }
 
 
@@ -471,7 +491,7 @@ OLED::OLED ( int8_t sda, int8_t scl )
 //                               O L E D _ D I S P L A Y B A T T E R Y                             *
 //**************************************************************************************************
 // Show the current battery charge level on the screen.                                            *
-// It will overwrite the top divider.                                                              *
+// It will be drawn just above the first content line (y=3).                                       *
 // No action if bat0/bat100 not defined in the preferences.                                        *
 //**************************************************************************************************
 void displaybattery ( uint16_t bat0, uint16_t bat100, uint16_t adcval )
@@ -481,8 +501,8 @@ void displaybattery ( uint16_t bat0, uint16_t bat100, uint16_t adcval )
     if ( bat0 < bat100 )                                  // Levels set in preferences?
     {
       static uint16_t oldpos = 0 ;                        // Previous charge level
-      uint16_t        ypos ;                              // Position on screen
-      uint16_t        v ;                                 // Constrainted ADC value
+      uint16_t        ypos = 3 ;                          // Position: just before line 1 (y=8)
+      uint16_t        v ;                                 // Constrained ADC value
       uint16_t        newpos ;                            // Current setting
 
       v = constrain ( adcval, bat0,                       // Prevent out of scale
@@ -493,7 +513,6 @@ void displaybattery ( uint16_t bat0, uint16_t bat100, uint16_t adcval )
       if ( newpos != oldpos )                             // Value changed?
       {
         oldpos = newpos ;                                 // Remember for next compare
-        ypos = tftdata[1].y - 5 ;                         // Just before 1st divider
         dsp_fillRect ( 0, ypos, newpos, 2, GREEN ) ;      // Paint green part
         dsp_fillRect ( newpos, ypos,
                        dsp_getwidth() - newpos,
@@ -569,50 +588,96 @@ void displaytime ( const char* str, uint16_t color )
   }
 }
 
+
+//******************************************************************************************
+//                                  S E T R O T A T I O N                                   *
+//******************************************************************************************
+// Set the display rotation (0, 90, 180, or 270 degrees)
+// 0°   = Normal
+// 90°  = Rotate 90 degrees clockwise
+// 180° = Upside down
+// 270° = Rotate 270 degrees clockwise (90 counter-clockwise)
+//******************************************************************************************
+void OLED::setRotation ( uint16_t rotation )
+{
+  uint8_t seg_remap ;
+  uint8_t com_scan ;
+  rotation = rotation % 360 ;                    // Constrain to 0-359
+
+  // Determine segment remap and COM scan based on rotation
+  switch ( rotation )
+  {
+    case 90:                                     // 90 degrees
+      seg_remap = OLED_CMD_SET_SEGMENT_REMAP_INV ;
+      com_scan = OLED_CMD_SET_COM_SCAN_MODE ;
+      break ;
+      
+    case 180:                                    // 180 degrees (upside down)
+      seg_remap = OLED_CMD_SET_SEGMENT_REMAP_INV ;
+      com_scan = OLED_CMD_SET_COM_SCAN_MODE_INV ;
+      break ;
+      
+    case 270:                                    // 270 degrees
+      seg_remap = OLED_CMD_SET_SEGMENT_REMAP ;
+      com_scan = OLED_CMD_SET_COM_SCAN_MODE_INV ;
+      break ;
+      
+    default:                                     // 0 degrees (normal)
+      seg_remap = OLED_CMD_SET_SEGMENT_REMAP ;
+      com_scan = OLED_CMD_SET_COM_SCAN_MODE ;
+      break ;
+  }
+
+  // Send rotation commands to OLED
+  Wire.beginTransmission ( OLED_I2C_ADDRESS ) ;
+  Wire.write ( OLED_CONTROL_BYTE_CMD_SINGLE ) ;
+  Wire.write ( seg_remap ) ;
+  Wire.write ( OLED_CONTROL_BYTE_CMD_SINGLE ) ;
+  Wire.write ( com_scan ) ;
+  Wire.endTransmission() ;
+}
+
+
 //******************************************************************************************
 //                              D I S P L A Y I N F O                                      *
 //******************************************************************************************
 // Show a string on the OLED at a specified position                                       *
-// pos: 0=top line, 1=second line, 2=third line, 3=bottom line (for 128x64)                *
-// str: string to display                                                                  *
+// str: string to display (will be UTF8 converted if needed)                               *
+// pos: line position (0=top, 1=second, 2=third, 3=bottom for 128x64)                      *
 //******************************************************************************************
 void displayinfo ( const char *str, int pos )
 {
-  uint16_t  width = dsp_getwidth() ;                   // Get screen width (128)
-  uint16_t  y_position ;                               // Y pixel position
-  uint16_t  height = 8 ;                               // Line height in pixels
-  uint16_t  color = WHITE ;                            // Default text color
+  uint16_t  width = dsp_getwidth() ;                   // Get screen width
+  uint16_t  y_position = pos * 8 ;                     // Y position: pos * 8 pixels/line
+  uint16_t  height = 8 ;                               // Line height
+  uint16_t  color = WHITE ;                            // Default color
   
-  // Calculate Y position: each line is 8 pixels high
-  y_position = pos * 8 ;
-  
-  // Adjust for top line (leave space for time display)
   if ( pos == 0 )
   {
-    width += TIMEPOS ;                                 // Leave space for clock
-    color = CYAN ;                                     // Use cyan color for top line
+    width += TIMEPOS ;                                 // Leave space for time
+    color = CYAN ;                                     // Highlight top line
   }
   
   if ( tft )                                           // Display active?
   {
-    dsp_fillRect ( 0, y_position, width, height, BLACK ) ;     // Clear the area
+    dsp_fillRect ( 0, y_position, width, height, BLACK ) ;     // Clear the line
     
-    if ( (dsp_getheight() > 64) && (pos > 0) )         // Add a divider line above if needed (for larger displays)
+    if ( (dsp_getheight() > 64) && (pos > 0) )         // Add divider line if needed
     {
       dsp_fillRect ( 0, y_position - 4, width, 1, GREEN ) ;
     }
     
-    if ( str && str[0] != '\0' )                       // Valid string?
+    if ( str && str[0] != '\0' )
     {
-      size_t len = strlen(str) + 1 ;
-      char buf[len] ;
-      strncpy(buf, str, len - 1) ;
-      buf[len - 1] = '\0' ;
-      utf8ascii_ip(buf) ;                              // Convert UTF8 to ASCII
-      
-      dsp_setTextColor(color) ;
-      dsp_setCursor(0, y_position) ;
-      dsp_println(buf) ;
+      size_t len = strlen ( str ) + 1 ;                // Copy string and convert UTF8
+      char buf [ len ] ;
+      strncpy ( buf, str, len - 1 ) ;
+      buf [ len - 1 ] = '\0' ;
+      utf8ascii_ip ( buf ) ;                           // Convert UTF8 to ASCII
+
+      dsp_setTextColor ( color ) ;
+      dsp_setCursor ( 0, y_position ) ;
+      dsp_println ( buf ) ;
     }
   }
 }
