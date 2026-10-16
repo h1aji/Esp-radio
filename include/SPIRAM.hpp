@@ -23,6 +23,7 @@ class SPIRAM
                       SPIRAM ( uint8_t cs, uint8_t clockspeedhz ) ;
     uint8_t           prcwinx ;                         // Index in pwchunk (see putring)
     uint8_t           prcrinx ;                         // Index in prchunk (see getring)
+    uint8_t           pwchunk[CHUNKSIZE] ;              // Staging buffer for one chunk (see putring)
     int32_t           spiramdelay = SPIRAMDELAY ;       // Delay before reading from SPIRAM
     void              Setup() ;
     void              Test() ;
@@ -32,6 +33,7 @@ class SPIRAM
     uint16_t          getFreeBufferSpace() ;
     void              bufferWrite ( uint8_t *b ) ;
     void              bufferRead ( uint8_t *b ) ;
+    void              flushPartial() ;
   private:
     uint8_t           Cs ;
     uint32_t          clkSpeed ;
@@ -169,6 +171,30 @@ void SPIRAM::bufferReset()
   chcount = 0 ;
   prcwinx = 0 ;
   prcrinx = 32 ;
+}
+
+
+//******************************************************************************************
+//                             F L U S H P A R T I A L                                     *
+//******************************************************************************************
+// Force the currently incomplete write chunk (if any) to be stored, padded with zero       *
+// bytes.  Only safe to call while parsing header/text data: zero bytes are ignored by      *
+// the HEADER byte handler, but would corrupt audio DATA or METADATA.                       *
+// Needed because a short, finite response (e.g. a redirect's HTTP header) may never        *
+// accumulate enough bytes to fill a 32 byte chunk on its own, leaving the final bytes      *
+// (often including the header-terminating blank line) stuck and never processed.           *
+//******************************************************************************************
+void SPIRAM::flushPartial()
+{
+  if ( prcwinx > 0 )                                    // Incomplete chunk pending?
+  {
+    while ( prcwinx < CHUNKSIZE )                       // Pad rest of chunk with zero bytes
+    {
+      pwchunk[prcwinx++] = 0 ;
+    }
+    bufferWrite ( pwchunk ) ;                           // Store padded chunk
+    prcwinx = 0 ;                                       // Index to begin of chunk
+  }
 }
 
 

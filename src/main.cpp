@@ -368,11 +368,10 @@ inline uint16_t ringavail()
 void putring ( uint8_t b )                   // Put one byte in the ringbuffer
 {
 #if defined ( SRAM )
-  static uint8_t pwchunk[32] ;               // Buffer for one chunk
-  pwchunk[spiram.prcwinx++] = b ;            // Store in local chunk
-  if ( spiram.prcwinx == sizeof(pwchunk) )   // Chunk full?
+  spiram.pwchunk[spiram.prcwinx++] = b ;     // Store in staging chunk
+  if ( spiram.prcwinx == CHUNKSIZE )         // Chunk full?
   {
-    spiram.bufferWrite ( pwchunk ) ;         // Yes, store in SPI RAM
+    spiram.bufferWrite ( spiram.pwchunk ) ;  // Yes, store in SPI RAM
     spiram.prcwinx = 0 ;                     // Index to begin of chunk
   }
 #else
@@ -418,8 +417,7 @@ uint8_t getring()
 void emptyring()
 {
 #if defined ( SRAM )
-  spiram.prcwinx = 0 ;
-  spiram.prcrinx = 32 ;                        // Set buffer to empty
+  spiram.bufferReset() ;                       // Reset chunk FIFO and staging indices
 #else
   rbwindex = 0 ;                               // Reset ringbuffer administration
   rbrindex = RINGBFSIZ - 1 ;
@@ -1695,6 +1693,15 @@ void loop()
       putring ( mp3client->read() ) ;                  // Yes, store one byte in ringbuffer
       yield() ;
     }
+  #if defined ( SRAM )
+    if ( ( datamode & ( HEADER |                        // Parsing text data (header, redirect,
+                        PLAYLISTHEADER |                 // or playlist) that may be too short to
+                        PLAYLISTDATA ) ) &&               // fill a whole chunk on its own?
+         ( mp3client->available() == 0 ) )               // No more bytes pending right now?
+    {
+      spiram.flushPartial() ;                            // Force out stuck partial chunk
+    }
+  #endif
     yield() ;
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
