@@ -901,9 +901,12 @@ bool connectwifi()
 {
   char*  pfs ;                                         // Pointer to formatted string
 
+  WiFi.persistent ( false ) ;                          // Do not save SSID and password
   WiFi.mode ( WIFI_OFF ) ;                             // Turn off WiFi first
   delay ( 100 ) ;                                      // Wait for radio to stabilize
   WiFi.mode ( WIFI_STA ) ;                             // Set ESP8266 as a station
+  wifi_station_set_hostname ( (char*)NAME ) ;          // Set hostname (after mode is STA, so it
+                                                        // is not lost by the mode(WIFI_OFF) above)
 
   WiFi.disconnect ( false ) ;                          // Disconnect without turning off radio
   delay ( 500 ) ;
@@ -1517,6 +1520,8 @@ void setup()
 
   Serial.begin ( 115200 ) ;                            // For debug
   Serial.println() ;
+  dbgprint ( "Reset reason: %s",                       // Show cause of last (re)boot
+             ESP.getResetInfo().c_str() ) ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
   
   #if not defined ( SRAM )
@@ -1566,11 +1571,6 @@ void setup()
   listNetworks() ;                                     // Search for WiFi networks
   readinifile() ;                                      // Read .ini file
   getpresets() ;                                       // Get the presets from .ini-file
-  WiFi.setPhyMode ( WIFI_PHY_MODE_11N ) ;              // Force 802.11N connection
-  WiFi.persistent ( false ) ;                          // Do not save SSID and password
-  WiFi.disconnect() ;                                  // The router may keep the old connection
-  WiFi.mode ( WIFI_STA ) ;                             // This ESP is a station
-  wifi_station_set_hostname ( (char*)NAME ) ;
   dbgprint ( "Starting ESP Version %s...  Free memory %d",
              VERSION,
              system_get_free_heap_size() ) ;           // Print some memory info
