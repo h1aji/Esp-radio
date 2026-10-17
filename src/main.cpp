@@ -37,6 +37,8 @@ extern "C"
 //
 #if defined ( LCD )
   #include "LCD2004.hpp"
+#elif defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
+  #include "OLED.hpp"
 #else
 // Empty declaration
   #define displayinfo(a,b)
@@ -94,6 +96,7 @@ struct ini_struct
   int8_t         clk_dst ;                                 // Number of hours shift during DST
   String         ssid ;                                    // SSID of WiFi network to connect to
   String         passwd ;                                  // Password for WiFi network
+  String         wifi_mode ;                               // WiFi mode
 } ;
 
 enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,
@@ -175,10 +178,6 @@ String      stationMount( "" ) ;                           // Radio stream Calls
 //******************************************************************************************
 // End of global data section.                                                             *
 //******************************************************************************************
-
-
-// The object for the MP3 player
-VS1053 vs1053player ( VS1053_CS, VS1053_DCS, VS1053_DREQ, VS1053_RST ) ;
 
 
 //******************************************************************************************
@@ -291,7 +290,7 @@ String utf8ascii ( const char* s )
 //**************************************************************************************************
 void gettime()
 {
-#if defined ( LCD )
+#if defined ( LCD ) || defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
 
@@ -309,7 +308,6 @@ void gettime()
       {
         dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
       }
-      dbgprint ( "Sync TOD" ) ;
       if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
       {
         dbgprint ( "Failed to obtain time!" ) ;             // Error
@@ -370,11 +368,10 @@ inline uint16_t ringavail()
 void putring ( uint8_t b )                   // Put one byte in the ringbuffer
 {
 #if defined ( SRAM )
-  static uint8_t pwchunk[32] ;               // Buffer for one chunk
-  pwchunk[spiram.prcwinx++] = b ;            // Store in local chunk
-  if ( spiram.prcwinx == sizeof(pwchunk) )   // Chunk full?
+  spiram.pwchunk[spiram.prcwinx++] = b ;     // Store in staging chunk
+  if ( spiram.prcwinx == CHUNKSIZE )         // Chunk full?
   {
-    spiram.bufferWrite ( pwchunk ) ;         // Yes, store in SPI RAM
+    spiram.bufferWrite ( spiram.pwchunk ) ;  // Yes, store in SPI RAM
     spiram.prcwinx = 0 ;                     // Index to begin of chunk
   }
 #else
@@ -420,8 +417,7 @@ uint8_t getring()
 void emptyring()
 {
 #if defined ( SRAM )
-  spiram.prcwinx = 0 ;
-  spiram.prcrinx = 32 ;                        // Set buffer to empty
+  spiram.bufferReset() ;                       // Reset chunk FIFO and staging indices
 #else
   rbwindex = 0 ;                               // Reset ringbuffer administration
   rbrindex = RINGBFSIZ - 1 ;
@@ -840,8 +836,10 @@ bool connecttohost()
 
   stop_mp3client() ;                                // Disconnect if still connected
   // dbgprint ( "Connect to new host %s", host.c_str() ) ;
+#if defined ( LCD )
   displayinfo ( "** Internet radio **", 1 ) ;
   displaytime ( "" ) ;                              // Clear time on LCD screen
+#endif
 
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
@@ -903,9 +901,28 @@ bool connectwifi()
 {
   char*  pfs ;                                         // Pointer to formatted string
 
-  WiFi.mode ( WIFI_STA ) ;                            // Set ESP8266 as a station
-  WiFi.disconnect ( true ) ;                          // Disconnect from any previous connections
-  delay ( 1000 );
+  WiFi.persistent ( false ) ;                          // Do not save SSID and password
+  WiFi.mode ( WIFI_OFF ) ;                             // Turn off WiFi first
+  delay ( 100 ) ;                                      // Wait for radio to stabilize
+  WiFi.mode ( WIFI_STA ) ;                             // Set ESP8266 as a station
+  wifi_station_set_hostname ( (char*)NAME ) ;          // Set hostname (after mode is STA, so it
+                                                        // is not lost by the mode(WIFI_OFF) above)
+
+  WiFi.disconnect ( false ) ;                          // Disconnect without turning off radio
+  delay ( 500 ) ;
+
+  if ( ini_block.wifi_mode.equals ( "b" ) )
+  {
+    WiFi.setPhyMode ( WIFI_PHY_MODE_11B ) ;            // Enable 802.11b mode
+  } 
+  else if ( ini_block.wifi_mode.equals ( "g" ) )
+  {
+    WiFi.setPhyMode ( WIFI_PHY_MODE_11G ) ;            // Enable 802.11g mode
+  }
+  else
+  {
+    WiFi.setPhyMode ( WIFI_PHY_MODE_11N ) ;            // Enable 802.11n mode
+  }
 
   WiFi.begin ( ini_block.ssid.c_str(),
                ini_block.passwd.c_str() ) ;            // Connect to selected SSID
@@ -914,8 +931,14 @@ bool connectwifi()
   unsigned long startTime = millis();                  // Custom Wi-Fi connection loop with timeout
   const unsigned long timeout = 10000;                 // 10 seconds timeout
   
-  while ( WiFi.status() != WL_CONNECTED && millis() - startTime < timeout )
+  while ( WiFi.status() != WL_CONNECTED )
   {
+    if ( millis() - startTime > timeout )              // Check timeout separately to avoid overflow issues
+    {
+      dbgprint ( "WiFi timeout after %lu ms", timeout ) ;
+      break ;
+    }
+    
     delay ( 500 ) ;                                    // Yield time for background tasks
     ESP.wdtFeed() ;                                    // Feed the watchdog to prevent WDT reset
     Serial.print ( "." ) ;
@@ -932,22 +955,25 @@ bool connectwifi()
                     WiFi.localIP()[3] ) ;
     displayinfo ( pfs, 3 ) ;                           // Show IP address on display
     return true;
-  } else {
-    // Failed to connect, switch to AP mode
-    dbgprint ( "WiFi Failed! Trying to setup AP with name %s", NAME );
+  } 
+  else 
+  {
+    uint8_t status = WiFi.status() ;
+    dbgprint ( "WiFi Failed! Status: %d", status ) ;   // Failed to connect, show why
+    dbgprint ( "Trying to setup AP with name %s", NAME ) ;
 
     boolean res = WiFi.softAP ( NAME, NULL ) ;         // Set up Access Point mode
 
     if ( res == true )
     {
-      dbgprint ( "WIFI Access Point is Ready" );
+      dbgprint ( "WIFI Access Point is Ready" ) ;
     }
     else
     {
-      dbgprint ( "WIFI Access Point Failed to Setup!" );
+      dbgprint ( "WIFI Access Point Failed to Setup!" ) ;
     }
 
-    delay ( 5000 ) ;
+    delay ( 1000 ) ;
     pfs = dbgprint ( "  IP = 192.168.4.1  " ) ;        // Display AP mode IP address
     displayinfo ( "* AP mode activated", 2 ) ;
     return false ;
@@ -962,6 +988,9 @@ bool connectwifi()
 //******************************************************************************************
 void otastart()
 {
+  const char* reply ;                                  // Result of analyzeCmd
+  reply = analyzeCmd ("stop") ;
+  dbgprint ( reply ) ;
   dbgprint ( "OTA Started" ) ;
 }
 
@@ -1487,9 +1516,12 @@ void setup()
   Dir         dir ;                                    // Directory struct for LittleFS
   File        f ;                                      // Filehandle
   String      filename ;                               // Name of file found in LittleFS
+  char*       pfs ;                                    // Pointer to formatted string
 
   Serial.begin ( 115200 ) ;                            // For debug
   Serial.println() ;
+  dbgprint ( "Reset reason: %s",                       // Show cause of last (re)boot
+             ESP.getResetInfo().c_str() ) ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
   
   #if not defined ( SRAM )
@@ -1504,6 +1536,7 @@ void setup()
   xml.init ( xmlbuffer, sizeof(xmlbuffer),             // Initilize XML stream.
              &XML_callback ) ;
   //memset ( &ini_block, 0, sizeof(ini_block) ) ;      // Init ini_block
+  ini_block.wifi_mode = "n" ;                          // Set WiFi mode to N
   ini_block.mqttbroker = "" ;
   ini_block.mqttport   = 1883 ;                        // Default port for MQTT
   ini_block.mqttuser   = "" ;
@@ -1538,11 +1571,6 @@ void setup()
   listNetworks() ;                                     // Search for WiFi networks
   readinifile() ;                                      // Read .ini file
   getpresets() ;                                       // Get the presets from .ini-file
-  WiFi.setPhyMode ( WIFI_PHY_MODE_11N ) ;              // Force 802.11N connection
-  WiFi.persistent ( false ) ;                          // Do not save SSID and password
-  WiFi.disconnect() ;                                  // The router may keep the old connection
-  WiFi.mode ( WIFI_STA ) ;                             // This ESP is a station
-  wifi_station_set_hostname ( (char*)NAME ) ;
   dbgprint ( "Starting ESP Version %s...  Free memory %d",
              VERSION,
              system_get_free_heap_size() ) ;           // Print some memory info
@@ -1562,18 +1590,28 @@ void setup()
   displayinfo ( "      Esp-radio     ", 0 ) ;
   delay ( 10 ) ;
   displayinfo ( "       Loading      ", 2 ) ;
+#elif defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
+  dsp_begin() ;
+  if ( tft )                                           // Display actually found?
+  {
+    dsp_setRotation ( OLED_ROTATION ) ;
+  }
+  displaysplash() ;
 #endif
 #if defined ( SRAM )
   spiram.Setup() ;                                     // Yes, do set-up
-  spiram.Test() ;                                      // Run simple SPIRAM test
   delay ( 10 ) ;
   displayinfo ( "SPI RAM test running", 3 ) ;
+  spiram.Test() ;                                      // Run simple SRAM test
+  delay ( 1000 ) ;
   emptyring() ;                                        // Empty the buffer
 #endif
   delay ( 10 ) ;
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
   tckr.attach ( 0.100, timer100 ) ;                    // Every 100 msec
   dbgprint ( "Selected network: %-25s", ini_block.ssid.c_str() ) ;
+  pfs = dbgprint ( "Connecting to: %-25s", ini_block.ssid.c_str() ) ;
+  displayinfo ( pfs, 3 ) ;                             // Show WiFi network on display
   NetworkFound = connectwifi() ;                       // Connect to WiFi network
   //NetworkFound = false ;                             // TEST, uncomment for no network test
   dbgprint ( "Start server for commands" ) ;
@@ -1586,6 +1624,7 @@ void setup()
     ArduinoOTA.setHostname ( NAME ) ;                  // Set the hostname
     ArduinoOTA.onStart ( otastart ) ;
     ArduinoOTA.begin() ;                               // Allow update over the air
+
     if ( ini_block.mqttbroker.length() )               // Broker specified?
     {
       // Initialize the MQTT client
@@ -1659,6 +1698,15 @@ void loop()
       putring ( mp3client->read() ) ;                  // Yes, store one byte in ringbuffer
       yield() ;
     }
+  #if defined ( SRAM )
+    if ( ( datamode & ( HEADER |                        // Parsing text data (header, redirect,
+                        PLAYLISTHEADER |                 // or playlist) that may be too short to
+                        PLAYLISTDATA ) ) &&               // fill a whole chunk on its own?
+         ( mp3client->available() == 0 ) )               // No more bytes pending right now?
+    {
+      spiram.flushPartial() ;                            // Force out stuck partial chunk
+    }
+  #endif
     yield() ;
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
@@ -1760,13 +1808,13 @@ void loop()
   {
     gettime() ;                                        // Yes, get the current time
   }
-  #if defined ( LCD )
+  #if defined ( LCD ) || defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
     if ( time_req )                                    // Time to refresh timetxt?
     {
       time_req = false ;                               // Yes, clear request
       if ( NetworkFound )                              // Time available?
       {
-        displaytime ( timetxt ) ;                      // Write to TFT screen
+        displaytime ( timetxt ) ;                      // Write to OLED screen
       }
       displayvolume ( vs1053player.getVolume() ) ;     // Show volume on display
     }
@@ -2070,6 +2118,11 @@ void handlebyte ( uint8_t b, bool force )
         if ( redirection )                             // Redirect seen?
         {
            datamode = INIT ;
+           stop_mp3client() ;                          // Stop old connection
+           emptyring() ;                               // Clear the ringbuffer/SPIRAM of old data
+        #if defined ( SRAM )
+           spiram.spiramdelay = 0 ;                    // Reset delay to resume data processing
+        #endif
         }
       }
     }

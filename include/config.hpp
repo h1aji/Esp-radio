@@ -1,5 +1,5 @@
 //
-#define VERSION "Thu, 19 Sep 2024 23:00:00 GMT"
+#define VERSION "Mon, 9 Feb 2026 10:30:00 GMT"
 //
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
 // Not that the password of an AP must be at least as long as 8 characters.
@@ -26,6 +26,11 @@
 //
 // Define LCD if you are using LCD 2004
 #define LCD
+// Or specify OLED screen model
+//#define OLED1106
+//#define OLED1306
+//#define OLED1309
+//#define OLED_ROTATION   180    // 0=normal, 90=right, 180=upside-down, 270=left
 //
 // Enable support for Infra-red receiver by uncommenting the next line
 #define IR
@@ -48,12 +53,6 @@ uint16_t ir_voldown = 0x4AB5 ;
 uint16_t ir_mute    = 0x38C7 ; // OK
 uint16_t ir_next    = 0x5AA5 ; // ->
 uint16_t ir_prev    = 0x10EF ; // <-
-//
-// Digital I/O pins used for VS1053 module
-#define VS1053_CS     0
-#define VS1053_DCS    16
-#define VS1053_DREQ   9
-#define VS1053_RST    10
 //
 // Definitions for 3 control switches on analog input
 // You can test the analog input values by holding down the switch and select /?analog=1

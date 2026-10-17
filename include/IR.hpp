@@ -1,5 +1,5 @@
 //***************************************************************************************************
-//   IR.h - Driver for Infrared receiver                                                            *
+//   IR.hpp - Driver for Infrared receiver                                                          *
 //***************************************************************************************************
 //                                                                                                  *
 //***************************************************************************************************
@@ -134,7 +134,7 @@ void scanIR()
     }
     else if ( ir_value == ir_preset6 )
     {
-      dbgprint ( "IR code %04X - ir_preset3", ir_value ) ;
+      dbgprint ( "IR code %04X - ir_preset6", ir_value ) ;
       reply = analyzeCmd ("preset=6") ;
       dbgprint ( reply ) ;
     }
