@@ -8,7 +8,7 @@
 #include <Wire.h>
 
 #ifndef OLED_ROTATION
-  #define OLED_ROTATION 0                           // Default: no rotation
+  #define OLED_ROTATION 0                          // Default: no rotation
 #endif
 
 
@@ -348,7 +348,7 @@ void OLED::display()
       Wire.beginTransmission ( OLED_I2C_ADDRESS ) ;           // Begin transmission
       Wire.write ( (uint8_t)OLED_CONTROL_BYTE_CMD_STREAM ) ;  // Set single byte command mode
       Wire.write ( (uint8_t)(0xB0 | pg ) ) ;                  // Set page address
-      if ( ( oledtyp == 1106 ) || ( oledtyp == 1309 ) )       // Is it an SH1106/ SSD1309?
+      if ( ( oledtyp == 1106 ) || ( oledtyp == 1309 ) )       // Is it SH1106 or SSD1309?
       {
         Wire.write ( (uint8_t)0x00 ) ;                        // Set lower column address to 0
         Wire.write ( (uint8_t)0x10 ) ;                        // Set higher column address to 0
@@ -544,7 +544,7 @@ void oled_displaybattery ( uint16_t bat0, uint16_t bat100, uint16_t adcval )
         dsp_fillRect ( 0, ypos, newpos, 2, GREEN ) ;      // Paint green part
         dsp_fillRect ( newpos, ypos,
                        dsp_getwidth() - newpos,
-                       2, RED ) ;                          // Paint red part
+                       2, RED ) ;                         // Paint red part
       }
     }
   }

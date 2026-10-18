@@ -1604,7 +1604,7 @@ void setup()
              &XML_callback ) ;
   //memset ( &ini_block, 0, sizeof(ini_block) ) ;      // Init ini_block
   ini_block.display = "none" ;                         // Allowed values: none, lcd2004, ssd1306, ssd1309, sh1106
-  ini_block.oledrotation = "0" ;                       // Default OLED rotation (0, 90, 180 or 270)
+  ini_block.oledrotation = 0 ;                         // Default OLED rotation (0, 90, 180 or 270)
   ini_block.wifi_mode = "n" ;                          // Set WiFi mode to N
   ini_block.mqttbroker = "" ;
   ini_block.mqttport   = 1883 ;                        // Default port for MQTT
