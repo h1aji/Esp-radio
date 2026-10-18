@@ -34,15 +34,79 @@ extern "C"
   #include "IR.hpp"
 #endif
 //
-#if defined ( LCD )
-  #include "LCD2004.hpp"
-#elif defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
-  #include "OLED.hpp"
-#else
-// Empty declaration
-  #define displayinfo(a,b)
-  #define displaytime(a)
-#endif
+// Display type is chosen at runtime (ini_block.display, see setup()), not at compile time,
+// so both drivers are always compiled in.
+#include "LCD2004.hpp"
+#include "OLED.hpp"
+
+bool useLCD  = false ;                                 // True if an LCD2004 is configured and found
+bool useOLED = false ;                                 // True if an OLED is configured and found
+
+//******************************************************************************************
+//                                D I S P L A Y I N F O                                    *
+//******************************************************************************************
+// Dispatch display calls to whichever driver (if any) is actually active.                 *
+//******************************************************************************************
+void displayinfo ( const char* str, int pos )
+{
+  if ( useLCD )
+  {
+    lcd_displayinfo ( str, pos ) ;
+  }
+  else if ( useOLED )
+  {
+    oled_displayinfo ( str, pos ) ;
+  }
+}
+
+void displaytime ( const char* str )
+{
+  if ( useLCD )
+  {
+    lcd_displaytime ( str ) ;
+  }
+  else if ( useOLED )
+  {
+    oled_displaytime ( str ) ;
+  }
+}
+
+void displayvolume ( uint8_t vol )
+{
+  if ( useLCD )
+  {
+    lcd_displayvolume ( vol ) ;
+  }
+  else if ( useOLED )
+  {
+    oled_displayvolume ( vol ) ;
+  }
+}
+
+bool dsp_begin()
+{
+  if ( useLCD )
+  {
+    return lcd_begin() ;
+  }
+  if ( useOLED )
+  {
+    return oled_begin() ;
+  }
+  return false ;
+}
+
+void dsp_update()
+{
+  if ( useLCD )
+  {
+    lcd_update() ;
+  }
+  else if ( useOLED )
+  {
+    oled_update() ;
+  }
+}
 //
 //******************************************************************************************
 // Forward declaration of various functions                                                *
@@ -96,6 +160,9 @@ struct ini_struct
   String         ssid ;                                    // SSID of WiFi network to connect to
   String         passwd ;                                  // Password for WiFi network
   String         wifi_mode ;                               // WiFi mode
+  String         display ;                                 // Display type: none, lcd2004, ssd1306,
+                                                              // ssd1309 or sh1106
+  uint16_t       oledrotation ;                            // OLED rotation: 0, 90, 180 or 270
 } ;
 
 enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,
@@ -288,44 +355,46 @@ String utf8ascii ( const char* s )
 //**************************************************************************************************
 void gettime()
 {
-#if defined ( LCD ) || defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
 
+  if ( ! ( useLCD || useOLED ) )                            // No display to show it on?
+  {
+    return ;                                                // Then don't bother syncing
+  }
+  if ( timeinfo.tm_year )                                   // Legal time found?
+  {
+    sprintf ( timetxt, "%02d:%02d:%02d",                    // Yes, format to a string
+              timeinfo.tm_hour,
+              timeinfo.tm_min,
+              timeinfo.tm_sec ) ;
+  }
+  if ( --delaycount <= 0 )                                  // Sync every few hours
+  {
+    delaycount = 7200 ;                                     // Reset counter
     if ( timeinfo.tm_year )                                 // Legal time found?
     {
-      sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
+      dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
+    }
+    if ( !getLocalTime ( &timeinfo ) )                      // Read from NTP server
+    {
+      dbgprint ( "Failed to obtain time!" ) ;               // Error
+      timeinfo.tm_year = 0 ;                                // Set current time to illegal
+      if ( retrycount )                                     // Give up syncing?
+      {
+        retrycount-- ;                                      // No try again
+        delaycount = 5 ;                                    // Retry after 5 seconds
+      }
+    }
+    else
+    {
+      sprintf ( timetxt, "%02d:%02d:%02d",                  // Format new time to a string
                 timeinfo.tm_hour,
                 timeinfo.tm_min,
                 timeinfo.tm_sec ) ;
+      dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
     }
-    if ( --delaycount <= 0 )                                // Sync every few hours
-    {
-      delaycount = 7200 ;                                   // Reset counter
-      if ( timeinfo.tm_year )                               // Legal time found?
-      {
-        dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
-      }
-      if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
-      {
-        dbgprint ( "Failed to obtain time!" ) ;             // Error
-        timeinfo.tm_year = 0 ;                              // Set current time to illegal
-        if ( retrycount )                                   // Give up syncing?
-        {
-          retrycount-- ;                                    // No try again
-          delaycount = 5 ;                                  // Retry after 5 seconds
-        }
-      }
-      else
-      {
-        sprintf ( timetxt, "%02d:%02d:%02d",                // Format new time to a string
-                  timeinfo.tm_hour,
-                  timeinfo.tm_min,
-                  timeinfo.tm_sec ) ;
-        dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
-      }
-    }
-#endif
+  }
 }
 
 
@@ -842,10 +911,8 @@ bool connecttohost()
 
   stop_mp3client() ;                                // Disconnect if still connected
   // dbgprint ( "Connect to new host %s", host.c_str() ) ;
-#if defined ( LCD )
   displayinfo ( "** Internet radio **", 1 ) ;
-  displaytime ( "" ) ;                              // Clear time on LCD screen
-#endif
+  displaytime ( "" ) ;                              // Clear time on display
 
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
@@ -1536,6 +1603,8 @@ void setup()
   xml.init ( xmlbuffer, sizeof(xmlbuffer),             // Initilize XML stream.
              &XML_callback ) ;
   //memset ( &ini_block, 0, sizeof(ini_block) ) ;      // Init ini_block
+  ini_block.display = "none" ;                         // Allowed values: none, lcd2004, ssd1306, ssd1309, sh1106
+  ini_block.oledrotation = "0" ;                       // Default OLED rotation (0, 90, 180 or 270)
   ini_block.wifi_mode = "n" ;                          // Set WiFi mode to N
   ini_block.mqttbroker = "" ;
   ini_block.mqttport   = 1883 ;                        // Default port for MQTT
@@ -1585,19 +1654,40 @@ void setup()
   { 
     vs1053player.loadDefaultVs1053Patches();           // Then load default patch set 
   }
-#if defined ( LCD )
-  dsp_begin();
-  displayinfo ( "      Esp-radio     ", 0 ) ;
-  delay ( 10 ) ;
-  displayinfo ( "       Loading      ", 2 ) ;
-#elif defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
-  dsp_begin() ;
-  if ( tft )                                           // Display actually found?
+  if ( ini_block.display == "lcd2004" )                // Display type as configured in radio.ini
   {
-    dsp_setRotation ( OLED_ROTATION ) ;
+    useLCD = true ;
   }
-  displaysplash() ;
-#endif
+  else if ( ini_block.display == "ssd1306" )
+  {
+    useOLED = true ;
+    oledtyp = 1306 ;
+  }
+  else if ( ini_block.display == "ssd1309" )
+  {
+    useOLED = true ;
+    oledtyp = 1309 ;
+  }
+  else if ( ini_block.display == "sh1106" )
+  {
+    useOLED = true ;
+    oledtyp = 1106 ;
+  }
+  // Else "none" (or an unrecognized value): no display, both flags stay false
+
+  if ( useLCD )
+  {
+    dsp_begin();
+    displayinfo ( "      Esp-radio     ", 0 ) ;
+    delay ( 10 ) ;
+    displayinfo ( "       Loading      ", 2 ) ;
+  }
+  else if ( useOLED )
+  {
+    dsp_begin() ;
+    oled_setRotation ( ini_block.oledrotation ) ;
+    oled_displaysplash() ;
+  }
   spiram.Setup() ;                                     // Prepare SPI bus and chip registers
   delay ( 10 ) ;
   displayinfo ( "Detecting SPI RAM", 3 ) ;
@@ -1812,22 +1902,20 @@ void loop()
   {
     gettime() ;                                        // Yes, get the current time
   }
-  #if defined ( LCD ) || defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
-    if ( time_req )                                    // Time to refresh timetxt?
+  if ( time_req )                                      // Time to refresh timetxt?
+  {
+    time_req = false ;                                 // Yes, clear request
+    if ( NetworkFound )                                // Time available?
     {
-      time_req = false ;                               // Yes, clear request
-      if ( NetworkFound )                              // Time available?
-      {
-        displaytime ( timetxt ) ;                      // Write to OLED screen
-      }
-      displayvolume ( vs1053player.getVolume() ) ;     // Show volume on display
+      displaytime ( timetxt ) ;                        // Write to display
     }
-    if ( scrollflag )                                  // Time to scroll?
-    {
-      dsp_update() ;                                   // LCD scroll
-      scrollflag = false ;                             // Yes, reset flag
-    }
-  #endif
+    displayvolume ( vs1053player.getVolume() ) ;       // Show volume on display
+  }
+  if ( scrollflag )                                    // Time to scroll?
+  {
+    dsp_update() ;                                     // LCD scroll
+    scrollflag = false ;                               // Yes, reset flag
+  }
   scanserial() ;                                       // Handle serial input
   ArduinoOTA.handle() ;                                // Check for OTA
   #if defined ( IR )
@@ -2486,6 +2574,9 @@ String chomp ( String str )
 //   mqttpasswd = mypassword                // Set MQTT password for authentication *)     *
 //   mqtttopic  = mytopic                   // Set MQTT topic to subscribe to *)           *
 //   mqttpubtopic = mypubtopic              // Set MQTT topic to publish to *)             *
+//   display    = ssd1306                   // Set display type: none, lcd2004, ssd1306,   *
+//                                           // ssd1309 or sh1106 *)                        *
+//   oledrotation = 0                       // Set OLED rotation: 0, 90, 180 or 270 *)      *
 //   status                                 // Show current URL to play                    *
 //   testfile   = <file on LittleFS>        // Test LittleFS reads for debugging purpose   *
 //   test                                   // For test purposes                           *
@@ -2727,6 +2818,35 @@ const char* analyzeCmd ( const char* par, const char* val )
     else if ( argument.indexOf ( "topic" ) > 0 )      // Topic specified?
     {
       ini_block.mqtttopic = value.c_str() ;           // Yes, set broker topic accordingly
+    }
+  }
+  else if ( argument == "display" )                   // Display type specified?
+  {
+    value.toLowerCase() ;                              // Allow any case
+    if ( ( value == "none" )    || ( value == "lcd2004" ) ||
+         ( value == "ssd1306" ) || ( value == "ssd1309" ) ||
+         ( value == "sh1106" ) )
+    {
+      ini_block.display = value ;                      // Yes, accept it
+      strcpy ( reply, "Display type changed. Save and restart to have effect" ) ;
+    }
+    else
+    {
+      strcpy ( reply, "Unknown display type, allowed: "
+                       "none, lcd2004, ssd1306, ssd1309, sh1106" ) ;
+    }
+  }
+  else if ( argument == "oledrotation" )              // OLED rotation specified?
+  {
+    if ( ( ivalue == 0 )   || ( ivalue == 90 ) ||
+         ( ivalue == 180 ) || ( ivalue == 270 ) )
+    {
+      ini_block.oledrotation = ivalue ;                // Yes, accept it
+      strcpy ( reply, "OLED rotation changed. Save and restart to have effect" ) ;
+    }
+    else
+    {
+      strcpy ( reply, "Invalid OLED rotation, allowed: 0, 90, 180, 270" ) ;
     }
   }
   else if ( argument == "debug" )                     // debug on/off request?
