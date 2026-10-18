@@ -27,9 +27,8 @@ extern "C"
 //
 #include "VS1053.hpp"
 //
-#if defined ( SRAM )
-  #include "SPIRAM.hpp"
-#endif
+#include "SPIRAM.hpp"                                 // SPI RAM support (auto-detected at boot,
+                                                        // falls back to internal ring buffer)
 //
 #if defined ( IR )
   #include "IR.hpp"
@@ -147,11 +146,10 @@ File             mp3file ;                                 // File containing mp
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
 uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
-#if not defined ( SRAM )
-  uint8_t       *ringbuf ;                                 // Ringbuffer for VS1053
-  uint16_t       rbwindex = 0 ;                            // Fill pointer in ringbuffer
-  uint16_t       rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
-#endif
+uint8_t*         ringbuf = NULL ;                          // Ringbuffer for VS1053, used as fallback
+                                                            // when no SPI RAM is detected
+uint16_t         rbwindex = 0 ;                            // Fill pointer in ringbuffer
+uint16_t         rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
 bool             scrollflag = false ;                      // Request to scroll LCD
 struct tm        timeinfo ;                                // Will be filled by NTP server
 char             timetxt[9] ;                              // Converted timeinfo
@@ -339,11 +337,12 @@ void gettime()
 //******************************************************************************************
 inline bool ringspace()
 {
-#if defined ( SRAM )
-  return spiram.spaceAvailable() ;         // True if at least one chunk is available
-#else
-  return ( rcount < RINGBFSIZ ) ;          // True if at least one byte of free space is available
-#endif
+  if ( spiram.found )                      // SPI RAM detected and in use?
+  {
+    return spiram.spaceAvailable() ;       // True if at least one chunk is available
+  } else {
+    return ( rcount < RINGBFSIZ ) ;        // True if at least one byte of free space is available
+  }
 }
 
 
@@ -352,11 +351,12 @@ inline bool ringspace()
 //******************************************************************************************
 inline uint16_t ringavail()
 {
-#if defined ( SRAM )
-  return spiram.dataAvailable() ;          // Return number of chunks filled
-#else
-  return rcount ;                          // Return number of bytes available
-#endif
+  if ( spiram.found )                      // SPI RAM detected and in use?
+  {
+    return spiram.dataAvailable() ;        // Return number of chunks filled
+  } else {
+    return rcount ;                        // Return number of bytes available
+  }
 }
 
 
@@ -365,23 +365,25 @@ inline uint16_t ringavail()
 //******************************************************************************************
 // No check on available space.  See ringspace()                                           *
 //******************************************************************************************
-void putring ( uint8_t b )                   // Put one byte in the ringbuffer
+void putring ( uint8_t b )                    // Put one byte in the ringbuffer
 {
-#if defined ( SRAM )
-  spiram.pwchunk[spiram.prcwinx++] = b ;     // Store in staging chunk
-  if ( spiram.prcwinx == CHUNKSIZE )         // Chunk full?
+  if ( spiram.found )                         // SPI RAM detected and in use?
   {
-    spiram.bufferWrite ( spiram.pwchunk ) ;  // Yes, store in SPI RAM
-    spiram.prcwinx = 0 ;                     // Index to begin of chunk
+    spiram.pwchunk[spiram.prcwinx++] = b ;    // Store in staging chunk
+    if ( spiram.prcwinx == CHUNKSIZE )        // Chunk full?
+    {
+      spiram.bufferWrite ( spiram.pwchunk ) ; // Yes, store in SPI RAM
+      spiram.prcwinx = 0 ;                    // Index to begin of chunk
+    }
+    return ;
+  } else {
+    *(ringbuf + rbwindex) = b ;               // Put byte in ringbuffer
+    if ( ++rbwindex == RINGBFSIZ )            // Increment pointer and
+    {
+      rbwindex = 0 ;                          // wrap at the end
+    }
+    rcount++ ;                                // Count number of bytes
   }
-#else
-  *(ringbuf + rbwindex) = b ;                // Put byte in ringbuffer
-  if ( ++rbwindex == RINGBFSIZ )             // Increment pointer and
-  {
-    rbwindex = 0 ;                           // wrap at the end
-  }
-  rcount++ ;                                 // Count number of bytes in the
-#endif
 }
 
 
@@ -392,22 +394,24 @@ void putring ( uint8_t b )                   // Put one byte in the ringbuffer
 //******************************************************************************************
 uint8_t getring()
 {
-#if defined ( SRAM )
-  static uint8_t prchunk[32] ;                 // Buffer for one chunk
-  if ( spiram.prcrinx >= sizeof(prchunk) )     // End of buffer reached?
+  static uint8_t prchunk[32] ;                 // Buffer for one chunk (SPI RAM path)
+
+  if ( spiram.found )                          // SPI RAM detected and in use?
   {
-    spiram.prcrinx = 0 ;                       // Yes, reset index to begin of buffer
-    spiram.bufferRead ( prchunk ) ;            // And read new buffer
+    if ( spiram.prcrinx >= sizeof(prchunk) )   // End of buffer reached?
+    {
+      spiram.prcrinx = 0 ;                     // Yes, reset index to begin of buffer
+      spiram.bufferRead ( prchunk ) ;          // And read new buffer
+    }
+    return ( prchunk[spiram.prcrinx++] ) ;
+  } else {
+    if ( ++rbrindex == RINGBFSIZ )               // Increment pointer and
+    {
+      rbrindex = 0 ;                             // wrap at the end
+    }
+    rcount-- ;                                   // Count is now one less
+    return *(ringbuf + rbrindex) ;               // Return the oldest byte
   }
-  return ( prchunk[spiram.prcrinx++] ) ;
-#else
-  if ( ++rbrindex == RINGBFSIZ )               // Increment pointer and
-  {
-    rbrindex = 0 ;                             // wrap at the end
-  }
-  rcount-- ;                                   // Count is now one less
-  return *(ringbuf + rbrindex) ;               // Return the oldest byte
-#endif
 }
 
 
@@ -416,13 +420,15 @@ uint8_t getring()
 //******************************************************************************************
 void emptyring()
 {
-#if defined ( SRAM )
-  spiram.bufferReset() ;                       // Reset chunk FIFO and staging indices
-#else
-  rbwindex = 0 ;                               // Reset ringbuffer administration
-  rbrindex = RINGBFSIZ - 1 ;
-  rcount = 0 ;
-#endif
+  if ( spiram.found )                          // SPI RAM detected and in use?
+  {
+    spiram.bufferReset() ;                     // Reset chunk FIFO and staging indices
+    return ;
+  } else {
+    rbwindex = 0 ;                               // Reset ringbuffer administration
+    rbrindex = RINGBFSIZ - 1 ;
+    rcount = 0 ;
+  }
 }
 
 
@@ -1523,12 +1529,6 @@ void setup()
   dbgprint ( "Reset reason: %s",                       // Show cause of last (re)boot
              ESP.getResetInfo().c_str() ) ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
-  
-  #if not defined ( SRAM )
-    ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
-    dbgprint ( "External buffer: Address %p, free %d\n",
-                                    ringbuf, ESP.getFreeHeap() ) ;
-  #endif
 
   #ifdef FIXEDWIFI                                     // Set fixedwifi if defined
     fixedwifi = FIXEDWIFI ;
@@ -1598,14 +1598,21 @@ void setup()
   }
   displaysplash() ;
 #endif
-#if defined ( SRAM )
-  spiram.Setup() ;                                     // Yes, do set-up
+  spiram.Setup() ;                                     // Prepare SPI bus and chip registers
   delay ( 10 ) ;
-  displayinfo ( "SPI RAM test running", 3 ) ;
-  spiram.Test() ;                                      // Run simple SRAM test
+  displayinfo ( "Detecting SPI RAM", 3 ) ;
+  if ( spiram.detect() )                               // Chip actually present and working?
+  {
+    dbgprint ( "Using SPI RAM as ring buffer, %d bytes", SPIRAM_SIZE ) ;
+  }
+  else
+  {
+    ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;        // No, fall back to internal ring buffer
+    dbgprint ( "Using internal ring buffer: Address %p, free %d",
+                                    ringbuf, ESP.getFreeHeap() ) ;
+  }
   delay ( 1000 ) ;
   emptyring() ;                                        // Empty the buffer
-#endif
   delay ( 10 ) ;
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
   tckr.attach ( 0.100, timer100 ) ;                    // Every 100 msec
@@ -1698,26 +1705,23 @@ void loop()
       putring ( mp3client->read() ) ;                  // Yes, store one byte in ringbuffer
       yield() ;
     }
-  #if defined ( SRAM )
-    if ( ( datamode & ( HEADER |                        // Parsing text data (header, redirect,
-                        PLAYLISTHEADER |                 // or playlist) that may be too short to
-                        PLAYLISTDATA ) ) &&               // fill a whole chunk on its own?
-         ( mp3client->available() == 0 ) )               // No more bytes pending right now?
+    if ( spiram.found &&                               // Using SPI RAM, and
+         ( datamode & ( HEADER |                       // parsing text data (header, redirect,
+                        PLAYLISTHEADER |               // or playlist) that may be too short to
+                        PLAYLISTDATA ) ) &&            // fill a whole chunk on its own?
+         ( mp3client->available() == 0 ) )             // No more bytes pending right now?
     {
-      spiram.flushPartial() ;                            // Force out stuck partial chunk
+      spiram.flushPartial() ;                          // Force out stuck partial chunk
     }
-  #endif
     yield() ;
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
-  #if defined ( SRAM )
-    if ( spiram.spiramdelay != 0 )                     // Delay before reading SPIRAM?
+    if ( spiram.found && ( spiram.spiramdelay != 0 ) ) // Using SPI RAM, delay before reading it?
     {
       spiram.spiramdelay-- ;                           // Yes, count down
       break ;                                          // and skip handling of data
     }
-  #endif
     handlebyte_ch ( getring() ) ;                      // Yes, handle it
   }
   yield() ;
@@ -2107,9 +2111,10 @@ void handlebyte ( uint8_t b, bool force )
                       ", metaint is %d",               // and metaint
                       mbitrate, metaint ) ;
           datamode = DATA ;                            // Expecting data now
-        #if defined ( SRAM )
-          spiram.spiramdelay = SPIRAMDELAY ;           // Start delay
-        #endif
+          if ( spiram.found )                          // Using SPI RAM?
+          {
+            spiram.spiramdelay = SPIRAMDELAY ;         // Start delay
+          }
           datacount = metaint ;                        // Number of bytes before first metadata
           bufcnt = 0 ;                                 // Reset buffer count
           vs1053player.switchToMp3Mode() ;
@@ -2120,9 +2125,10 @@ void handlebyte ( uint8_t b, bool force )
            datamode = INIT ;
            stop_mp3client() ;                          // Stop old connection
            emptyring() ;                               // Clear the ringbuffer/SPIRAM of old data
-        #if defined ( SRAM )
-           spiram.spiramdelay = 0 ;                    // Reset delay to resume data processing
-        #endif
+           if ( spiram.found )                         // Using SPI RAM?
+           {
+             spiram.spiramdelay = 0 ;                  // Reset delay to resume data processing
+           }
         }
       }
     }
@@ -2638,9 +2644,10 @@ const char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-  #if defined ( SRAM )                                // SPI RAM used?
-    rcount = spiram.dataAvailable() ;                 // Yes, get free space
-  #endif
+    if ( spiram.found )                                // SPI RAM used?
+    {
+      rcount = spiram.dataAvailable() ;                // Yes, get free space
+    }
     if ( mp3client )
     {
       sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",

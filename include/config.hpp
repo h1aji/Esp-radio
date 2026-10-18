@@ -21,8 +21,8 @@
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS     20
 //
-// Use 23LC1024 SPI RAM as ringbuffer
-#define SRAM
+// A 23LC1024 SPI RAM chip, if wired up, is detected automatically at boot and used as the
+// ring buffer instead of RINGBFSIZ bytes of internal RAM.  No configuration needed here.
 //
 // Define LCD if you are using LCD 2004
 #define LCD

@@ -52,3 +52,4 @@
 - 10-02-2022: Add redirection.
 - 16-02-2022: SPI RAM modifications.
 - 13-04-2022: IR functionality have been re-implemented.
+- 17-10-2026: SPIRAM redirect issue fixed
