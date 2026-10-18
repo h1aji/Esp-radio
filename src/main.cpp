@@ -30,9 +30,7 @@ extern "C"
 #include "SPIRAM.hpp"                                 // SPI RAM support (auto-detected at boot,
                                                         // falls back to internal ring buffer)
 //
-#if defined ( IR )
-  #include "IR.hpp"
-#endif
+#include "IR.hpp"                                     // IR support (enabled/disabled at runtime)
 //
 // Display type is chosen at runtime (ini_block.display, see setup()), not at compile time,
 // so both drivers are always compiled in.
@@ -163,6 +161,7 @@ struct ini_struct
   String         display ;                                 // Display type: none, lcd2004, ssd1306,
                                                               // ssd1309 or sh1106
   uint16_t       oledrotation ;                            // OLED rotation: 0, 90, 180 or 270
+  bool           ir_enabled ;                              // Infrared receiver enabled?
 } ;
 
 enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,
@@ -1605,6 +1604,7 @@ void setup()
   //memset ( &ini_block, 0, sizeof(ini_block) ) ;      // Init ini_block
   ini_block.display = "none" ;                         // Allowed values: none, lcd2004, ssd1306, ssd1309, sh1106
   ini_block.oledrotation = 0 ;                         // Default OLED rotation (0, 90, 180 or 270)
+  ini_block.ir_enabled = false ;                       // Infrared disabled by default
   ini_block.wifi_mode = "n" ;                          // Set WiFi mode to N
   ini_block.mqttbroker = "" ;
   ini_block.mqttport   = 1883 ;                        // Default port for MQTT
@@ -1646,9 +1646,10 @@ void setup()
   dbgprint ( "Sketch size %d, free size %d",
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;              // And sketch info
-#if defined ( IR )
-  setupIR() ;
-#endif
+  if ( ini_block.ir_enabled )                          // IR enabled in configuration?
+  {
+    setupIR() ;
+  }
   vs1053player.begin() ;                               // Initialize VS1053 player
   if ( vs1053player.getChipVersion() == 4 )            // Check if we are using VS1053B chip
   { 
@@ -1918,9 +1919,10 @@ void loop()
   }
   scanserial() ;                                       // Handle serial input
   ArduinoOTA.handle() ;                                // Check for OTA
-  #if defined ( IR )
+  if ( ini_block.ir_enabled )                          // IR enabled in configuration?
+  {
     scanIR() ;                                         // See if IR input
-  #endif
+  }
 }
 
 
@@ -2575,8 +2577,9 @@ String chomp ( String str )
 //   mqtttopic  = mytopic                   // Set MQTT topic to subscribe to *)           *
 //   mqttpubtopic = mypubtopic              // Set MQTT topic to publish to *)             *
 //   display    = ssd1306                   // Set display type: none, lcd2004, ssd1306,   *
-//                                           // ssd1309 or sh1106 *)                        *
+//                                          // ssd1309 or sh1106 *)                        *
 //   oledrotation = 0                       // Set OLED rotation: 0, 90, 180 or 270 *)      *
+//   ir_enabled = 0 or 1                    // Enable/disable infrared receiver *)          *
 //   status                                 // Show current URL to play                    *
 //   testfile   = <file on LittleFS>        // Test LittleFS reads for debugging purpose   *
 //   test                                   // For test purposes                           *
@@ -2848,6 +2851,11 @@ const char* analyzeCmd ( const char* par, const char* val )
     {
       strcpy ( reply, "Invalid OLED rotation, allowed: 0, 90, 180, 270" ) ;
     }
+  }
+  else if ( argument == "ir_enabled" )                // Infrared receiver on/off?
+  {
+    ini_block.ir_enabled = ( ivalue != 0 ) ;          // Yes, set flag accordingly
+    strcpy ( reply, "IR setting changed. Save and restart to have effect" ) ;
   }
   else if ( argument == "debug" )                     // debug on/off request?
   {

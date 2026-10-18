@@ -52,4 +52,8 @@
 - 10-02-2022: Add redirection.
 - 16-02-2022: SPI RAM modifications.
 - 13-04-2022: IR functionality have been re-implemented.
+- 07-08-2026: Draft OLED display support added
 - 17-10-2026: SPIRAM redirect issue fixed
+- 17-10-2026: SPIRAM auto detect functionality added
+- 18-10-2026: Display type option added to web configuration
+- 19-10-2026: Infrared setting added to configuration

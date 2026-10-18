@@ -22,9 +22,6 @@
 #define MAXMQTTCONNECTS     20
 //
 //
-// Enable support for Infra-red receiver by uncommenting the next line
-#define IR
-//
 // IR codes assigned to buttons
 uint16_t ir_preset1 = 0xA25D ;
 uint16_t ir_preset2 = 0x629D ;
