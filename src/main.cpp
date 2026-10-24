@@ -1427,17 +1427,17 @@ void getpresets()
           rest.trim() ;
           if ( rest.startsWith ( "-" ) )                  // Followed by a dash?
           {
-            rest.remove ( 0, 1 ) ;                         // Yes, this was a leading preset number
+            rest.remove ( 0, 1 ) ;                        // Yes, this was a leading preset number
             rest.trim() ;
-            line = rest ;
+            line = String (" - ") + rest ;
           }
         }
-        sprintf ( vnr, "%02d", i ) ;                     // Preset number
-        presetlist += ( String ( vnr ) + line +          // 2 digits plus description
+        sprintf ( vnr, "%02d", i ) ;                      // Preset number
+        presetlist += ( String ( vnr ) + line +           // 2 digits plus description
                         String ( "|" ) ) ;
       }
     }
-    inifile.close() ;                                    // Close the file
+    inifile.close() ;                                     // Close the file
   }
 }
 
