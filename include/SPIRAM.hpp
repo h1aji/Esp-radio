@@ -25,8 +25,9 @@ class SPIRAM
     uint8_t           prcrinx ;                         // Index in prchunk (see getring)
     uint8_t           pwchunk[CHUNKSIZE] ;              // Staging buffer for one chunk (see putring)
     int32_t           spiramdelay = SPIRAMDELAY ;       // Delay before reading from SPIRAM
+    bool              found = false ;                   // True if SPI RAM chip was detected
     void              Setup() ;
-    void              Test() ;
+    bool              detect() ;
     void              bufferReset() ;
     bool              spaceAvailable() ;
     uint16_t          dataAvailable() ;
@@ -247,11 +248,13 @@ void SPIRAM::Setup()
 
 
 //******************************************************************************************
-//                                S P I R A M T E S T                                      *
+//                                S P I R A M D E T E C T                                  *
 //******************************************************************************************
-// Simple test to ensure that SPI RAM is working correctly.                                *
+// Write a known pattern and read it back to find out if an SPI RAM chip is actually       *
+// wired up and responding.  Sets "found" and leaves the buffer administration reset so    *
+// the caller can start using the chip (or fall back to an internal buffer) right away.    *
 //******************************************************************************************
-void SPIRAM::Test()
+bool SPIRAM::detect()
 {
   uint8_t writeData[CHUNKSIZE] = { 0xDE, 0xAD, 0xBE, 0xEF } ;
   uint8_t readData[CHUNKSIZE] = { 0x00 } ;
@@ -259,22 +262,24 @@ void SPIRAM::Test()
   bufferWrite ( writeData ) ;                           // Write to SPI RAM
   bufferRead ( readData ) ;                             // Read from SPI RAM
 
-  bool match = true ;
+  found = true ;                                        // Assume success
   for ( int i = 0; i < CHUNKSIZE; ++i )
   {
     if ( readData[i] != writeData[i] )
     {
-      match = false ;
+      found = false ;                                   // Mismatch: no (working) chip found
       break ;
     }
   }
 
-  if ( match )
+  if ( found )
   {
     dbgprint ( "SPI RAM detected and functioning correctly" ) ;
   }
   else
   {
-    dbgprint ( "Failed to verify SPI RAM. Check connections and settings" ) ;
+    dbgprint ( "No SPI RAM found, using internal ring buffer instead" ) ;
   }
+  bufferReset() ;                                       // Start with a clean buffer administration
+  return found ;
 }

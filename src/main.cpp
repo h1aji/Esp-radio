@@ -27,23 +27,84 @@ extern "C"
 //
 #include "VS1053.hpp"
 //
-#if defined ( SRAM )
-  #include "SPIRAM.hpp"
-#endif
+#include "SPIRAM.hpp"                                 // SPI RAM support (auto-detected at boot,
+                                                        // falls back to internal ring buffer)
 //
-#if defined ( IR )
-  #include "IR.hpp"
-#endif
+#include "IR.hpp"                                     // IR support (enabled/disabled at runtime)
 //
-#if defined ( LCD )
-  #include "LCD2004.hpp"
-#elif defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
-  #include "OLED.hpp"
-#else
-// Empty declaration
-  #define displayinfo(a,b)
-  #define displaytime(a)
-#endif
+// Display type is chosen at runtime (ini_block.display, see setup()), not at compile time,
+// so both drivers are always compiled in.
+#include "LCD2004.hpp"
+#include "OLED.hpp"
+
+bool useLCD  = false ;                                 // True if an LCD2004 is configured and found
+bool useOLED = false ;                                 // True if an OLED is configured and found
+
+//******************************************************************************************
+//                                D I S P L A Y I N F O                                    *
+//******************************************************************************************
+// Dispatch display calls to whichever driver (if any) is actually active.                 *
+//******************************************************************************************
+void displayinfo ( const char* str, int pos )
+{
+  if ( useLCD )
+  {
+    lcd_displayinfo ( str, pos ) ;
+  }
+  else if ( useOLED )
+  {
+    oled_displayinfo ( str, pos ) ;
+  }
+}
+
+void displaytime ( const char* str )
+{
+  if ( useLCD )
+  {
+    lcd_displaytime ( str ) ;
+  }
+  else if ( useOLED )
+  {
+    oled_displaytime ( str ) ;
+  }
+}
+
+void displayvolume ( uint8_t vol )
+{
+  if ( useLCD )
+  {
+    lcd_displayvolume ( vol ) ;
+  }
+  else if ( useOLED )
+  {
+    oled_displayvolume ( vol ) ;
+  }
+}
+
+bool dsp_begin()
+{
+  if ( useLCD )
+  {
+    return lcd_begin() ;
+  }
+  if ( useOLED )
+  {
+    return oled_begin() ;
+  }
+  return false ;
+}
+
+void dsp_update()
+{
+  if ( useLCD )
+  {
+    lcd_update() ;
+  }
+  else if ( useOLED )
+  {
+    oled_update() ;
+  }
+}
 //
 //******************************************************************************************
 // Forward declaration of various functions                                                *
@@ -97,6 +158,10 @@ struct ini_struct
   String         ssid ;                                    // SSID of WiFi network to connect to
   String         passwd ;                                  // Password for WiFi network
   String         wifi_mode ;                               // WiFi mode
+  String         display ;                                 // Display type: none, lcd2004, ssd1306,
+                                                              // ssd1309 or sh1106
+  uint16_t       oledrotation ;                            // OLED rotation: 0, 90, 180 or 270
+  bool           ir_enabled ;                              // Infrared receiver enabled?
 } ;
 
 enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,
@@ -147,11 +212,10 @@ File             mp3file ;                                 // File containing mp
 bool             chunked = false ;                         // Station provides chunked transfer
 int              chunkcount = 0 ;                          // Counter for chunked transfer
 uint16_t         rcount = 0 ;                              // Number of bytes/chunks in ringbuffer/SPIRAM
-#if not defined ( SRAM )
-  uint8_t       *ringbuf ;                                 // Ringbuffer for VS1053
-  uint16_t       rbwindex = 0 ;                            // Fill pointer in ringbuffer
-  uint16_t       rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
-#endif
+uint8_t*         ringbuf = NULL ;                          // Ringbuffer for VS1053, used as fallback
+                                                            // when no SPI RAM is detected
+uint16_t         rbwindex = 0 ;                            // Fill pointer in ringbuffer
+uint16_t         rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
 bool             scrollflag = false ;                      // Request to scroll LCD
 struct tm        timeinfo ;                                // Will be filled by NTP server
 char             timetxt[9] ;                              // Converted timeinfo
@@ -290,44 +354,46 @@ String utf8ascii ( const char* s )
 //**************************************************************************************************
 void gettime()
 {
-#if defined ( LCD ) || defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
 
+  if ( ! ( useLCD || useOLED ) )                            // No display to show it on?
+  {
+    return ;                                                // Then don't bother syncing
+  }
+  if ( timeinfo.tm_year )                                   // Legal time found?
+  {
+    sprintf ( timetxt, "%02d:%02d:%02d",                    // Yes, format to a string
+              timeinfo.tm_hour,
+              timeinfo.tm_min,
+              timeinfo.tm_sec ) ;
+  }
+  if ( --delaycount <= 0 )                                  // Sync every few hours
+  {
+    delaycount = 7200 ;                                     // Reset counter
     if ( timeinfo.tm_year )                                 // Legal time found?
     {
-      sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
+      dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
+    }
+    if ( !getLocalTime ( &timeinfo ) )                      // Read from NTP server
+    {
+      dbgprint ( "Failed to obtain time!" ) ;               // Error
+      timeinfo.tm_year = 0 ;                                // Set current time to illegal
+      if ( retrycount )                                     // Give up syncing?
+      {
+        retrycount-- ;                                      // No try again
+        delaycount = 5 ;                                    // Retry after 5 seconds
+      }
+    }
+    else
+    {
+      sprintf ( timetxt, "%02d:%02d:%02d",                  // Format new time to a string
                 timeinfo.tm_hour,
                 timeinfo.tm_min,
                 timeinfo.tm_sec ) ;
+      dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
     }
-    if ( --delaycount <= 0 )                                // Sync every few hours
-    {
-      delaycount = 7200 ;                                   // Reset counter
-      if ( timeinfo.tm_year )                               // Legal time found?
-      {
-        dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
-      }
-      if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
-      {
-        dbgprint ( "Failed to obtain time!" ) ;             // Error
-        timeinfo.tm_year = 0 ;                              // Set current time to illegal
-        if ( retrycount )                                   // Give up syncing?
-        {
-          retrycount-- ;                                    // No try again
-          delaycount = 5 ;                                  // Retry after 5 seconds
-        }
-      }
-      else
-      {
-        sprintf ( timetxt, "%02d:%02d:%02d",                // Format new time to a string
-                  timeinfo.tm_hour,
-                  timeinfo.tm_min,
-                  timeinfo.tm_sec ) ;
-        dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
-      }
-    }
-#endif
+  }
 }
 
 
@@ -339,11 +405,12 @@ void gettime()
 //******************************************************************************************
 inline bool ringspace()
 {
-#if defined ( SRAM )
-  return spiram.spaceAvailable() ;         // True if at least one chunk is available
-#else
-  return ( rcount < RINGBFSIZ ) ;          // True if at least one byte of free space is available
-#endif
+  if ( spiram.found )                      // SPI RAM detected and in use?
+  {
+    return spiram.spaceAvailable() ;       // True if at least one chunk is available
+  } else {
+    return ( rcount < RINGBFSIZ ) ;        // True if at least one byte of free space is available
+  }
 }
 
 
@@ -352,11 +419,12 @@ inline bool ringspace()
 //******************************************************************************************
 inline uint16_t ringavail()
 {
-#if defined ( SRAM )
-  return spiram.dataAvailable() ;          // Return number of chunks filled
-#else
-  return rcount ;                          // Return number of bytes available
-#endif
+  if ( spiram.found )                      // SPI RAM detected and in use?
+  {
+    return spiram.dataAvailable() ;        // Return number of chunks filled
+  } else {
+    return rcount ;                        // Return number of bytes available
+  }
 }
 
 
@@ -365,23 +433,25 @@ inline uint16_t ringavail()
 //******************************************************************************************
 // No check on available space.  See ringspace()                                           *
 //******************************************************************************************
-void putring ( uint8_t b )                   // Put one byte in the ringbuffer
+void putring ( uint8_t b )                    // Put one byte in the ringbuffer
 {
-#if defined ( SRAM )
-  spiram.pwchunk[spiram.prcwinx++] = b ;     // Store in staging chunk
-  if ( spiram.prcwinx == CHUNKSIZE )         // Chunk full?
+  if ( spiram.found )                         // SPI RAM detected and in use?
   {
-    spiram.bufferWrite ( spiram.pwchunk ) ;  // Yes, store in SPI RAM
-    spiram.prcwinx = 0 ;                     // Index to begin of chunk
+    spiram.pwchunk[spiram.prcwinx++] = b ;    // Store in staging chunk
+    if ( spiram.prcwinx == CHUNKSIZE )        // Chunk full?
+    {
+      spiram.bufferWrite ( spiram.pwchunk ) ; // Yes, store in SPI RAM
+      spiram.prcwinx = 0 ;                    // Index to begin of chunk
+    }
+    return ;
+  } else {
+    *(ringbuf + rbwindex) = b ;               // Put byte in ringbuffer
+    if ( ++rbwindex == RINGBFSIZ )            // Increment pointer and
+    {
+      rbwindex = 0 ;                          // wrap at the end
+    }
+    rcount++ ;                                // Count number of bytes
   }
-#else
-  *(ringbuf + rbwindex) = b ;                // Put byte in ringbuffer
-  if ( ++rbwindex == RINGBFSIZ )             // Increment pointer and
-  {
-    rbwindex = 0 ;                           // wrap at the end
-  }
-  rcount++ ;                                 // Count number of bytes in the
-#endif
 }
 
 
@@ -392,22 +462,24 @@ void putring ( uint8_t b )                   // Put one byte in the ringbuffer
 //******************************************************************************************
 uint8_t getring()
 {
-#if defined ( SRAM )
-  static uint8_t prchunk[32] ;                 // Buffer for one chunk
-  if ( spiram.prcrinx >= sizeof(prchunk) )     // End of buffer reached?
+  static uint8_t prchunk[32] ;                 // Buffer for one chunk (SPI RAM path)
+
+  if ( spiram.found )                          // SPI RAM detected and in use?
   {
-    spiram.prcrinx = 0 ;                       // Yes, reset index to begin of buffer
-    spiram.bufferRead ( prchunk ) ;            // And read new buffer
+    if ( spiram.prcrinx >= sizeof(prchunk) )   // End of buffer reached?
+    {
+      spiram.prcrinx = 0 ;                     // Yes, reset index to begin of buffer
+      spiram.bufferRead ( prchunk ) ;          // And read new buffer
+    }
+    return ( prchunk[spiram.prcrinx++] ) ;
+  } else {
+    if ( ++rbrindex == RINGBFSIZ )               // Increment pointer and
+    {
+      rbrindex = 0 ;                             // wrap at the end
+    }
+    rcount-- ;                                   // Count is now one less
+    return *(ringbuf + rbrindex) ;               // Return the oldest byte
   }
-  return ( prchunk[spiram.prcrinx++] ) ;
-#else
-  if ( ++rbrindex == RINGBFSIZ )               // Increment pointer and
-  {
-    rbrindex = 0 ;                             // wrap at the end
-  }
-  rcount-- ;                                   // Count is now one less
-  return *(ringbuf + rbrindex) ;               // Return the oldest byte
-#endif
 }
 
 
@@ -416,13 +488,15 @@ uint8_t getring()
 //******************************************************************************************
 void emptyring()
 {
-#if defined ( SRAM )
-  spiram.bufferReset() ;                       // Reset chunk FIFO and staging indices
-#else
-  rbwindex = 0 ;                               // Reset ringbuffer administration
-  rbrindex = RINGBFSIZ - 1 ;
-  rcount = 0 ;
-#endif
+  if ( spiram.found )                          // SPI RAM detected and in use?
+  {
+    spiram.bufferReset() ;                     // Reset chunk FIFO and staging indices
+    return ;
+  } else {
+    rbwindex = 0 ;                               // Reset ringbuffer administration
+    rbrindex = RINGBFSIZ - 1 ;
+    rcount = 0 ;
+  }
 }
 
 
@@ -836,10 +910,8 @@ bool connecttohost()
 
   stop_mp3client() ;                                // Disconnect if still connected
   // dbgprint ( "Connect to new host %s", host.c_str() ) ;
-#if defined ( LCD )
   displayinfo ( "** Internet radio **", 1 ) ;
-  displaytime ( "" ) ;                              // Clear time on LCD screen
-#endif
+  displaytime ( "" ) ;                              // Clear time on display
 
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
@@ -1341,12 +1413,31 @@ void getpresets()
           }
         }
         line = chomp ( line ) ;                          // Remove garbage from description
-        sprintf ( vnr, "%02d", i ) ;                     // Preset number
-        presetlist += ( String ( vnr ) + line +          // 2 digits plus description
+        // The comment in the ini file often documents the preset number itself,
+        // e.g. "preset_00 = ... # 0 - Station Name".  Strip that leading "<nr> - "
+        // so it is not duplicated with the "vnr" generated below.
+        inx = 0 ;
+        while ( inx < (int)line.length() && isDigit ( line[inx] ) )
+        {
+          inx++ ;                                        // Skip leading digits
+        }
+        if ( ( inx > 0 ) && ( inx < (int)line.length() ) )
+        {
+          String rest = line.substring ( inx ) ;          // Part after the digits
+          rest.trim() ;
+          if ( rest.startsWith ( "-" ) )                  // Followed by a dash?
+          {
+            rest.remove ( 0, 1 ) ;                        // Yes, this was a leading preset number
+            rest.trim() ;
+            line = String (" - ") + rest ;
+          }
+        }
+        sprintf ( vnr, "%02d", i ) ;                      // Preset number
+        presetlist += ( String ( vnr ) + line +           // 2 digits plus description
                         String ( "|" ) ) ;
       }
     }
-    inifile.close() ;                                    // Close the file
+    inifile.close() ;                                     // Close the file
   }
 }
 
@@ -1523,12 +1614,6 @@ void setup()
   dbgprint ( "Reset reason: %s",                       // Show cause of last (re)boot
              ESP.getResetInfo().c_str() ) ;
   system_update_cpu_freq ( 160 ) ;                     // Set to 80/160 MHz
-  
-  #if not defined ( SRAM )
-    ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;       // Create ring buffer
-    dbgprint ( "External buffer: Address %p, free %d\n",
-                                    ringbuf, ESP.getFreeHeap() ) ;
-  #endif
 
   #ifdef FIXEDWIFI                                     // Set fixedwifi if defined
     fixedwifi = FIXEDWIFI ;
@@ -1536,6 +1621,9 @@ void setup()
   xml.init ( xmlbuffer, sizeof(xmlbuffer),             // Initilize XML stream.
              &XML_callback ) ;
   //memset ( &ini_block, 0, sizeof(ini_block) ) ;      // Init ini_block
+  ini_block.display = "none" ;                         // Allowed values: none, lcd2004, ssd1306, ssd1309, sh1106
+  ini_block.oledrotation = 0 ;                         // Default OLED rotation (0, 90, 180 or 270)
+  ini_block.ir_enabled = false ;                       // Infrared disabled by default
   ini_block.wifi_mode = "n" ;                          // Set WiFi mode to N
   ini_block.mqttbroker = "" ;
   ini_block.mqttport   = 1883 ;                        // Default port for MQTT
@@ -1577,35 +1665,64 @@ void setup()
   dbgprint ( "Sketch size %d, free size %d",
              ESP.getSketchSize(),
              ESP.getFreeSketchSpace() ) ;              // And sketch info
-#if defined ( IR )
-  setupIR() ;
-#endif
+  if ( ini_block.ir_enabled )                          // IR enabled in configuration?
+  {
+    setupIR() ;
+  }
   vs1053player.begin() ;                               // Initialize VS1053 player
   if ( vs1053player.getChipVersion() == 4 )            // Check if we are using VS1053B chip
   { 
     vs1053player.loadDefaultVs1053Patches();           // Then load default patch set 
   }
-#if defined ( LCD )
-  dsp_begin();
-  displayinfo ( "      Esp-radio     ", 0 ) ;
-  delay ( 10 ) ;
-  displayinfo ( "       Loading      ", 2 ) ;
-#elif defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
-  dsp_begin() ;
-  if ( tft )                                           // Display actually found?
+  if ( ini_block.display == "lcd2004" )                // Display type as configured in radio.ini
   {
-    dsp_setRotation ( OLED_ROTATION ) ;
+    useLCD = true ;
   }
-  displaysplash() ;
-#endif
-#if defined ( SRAM )
-  spiram.Setup() ;                                     // Yes, do set-up
+  else if ( ini_block.display == "ssd1306" )
+  {
+    useOLED = true ;
+    oledtyp = 1306 ;
+  }
+  else if ( ini_block.display == "ssd1309" )
+  {
+    useOLED = true ;
+    oledtyp = 1309 ;
+  }
+  else if ( ini_block.display == "sh1106" )
+  {
+    useOLED = true ;
+    oledtyp = 1106 ;
+  }
+  // Else "none" (or an unrecognized value): no display, both flags stay false
+
+  if ( useLCD )
+  {
+    dsp_begin();
+    displayinfo ( "      Esp-radio     ", 0 ) ;
+    delay ( 10 ) ;
+    displayinfo ( "       Loading      ", 2 ) ;
+  }
+  else if ( useOLED )
+  {
+    dsp_begin() ;
+    oled_setRotation ( ini_block.oledrotation ) ;
+    oled_displaysplash() ;
+  }
+  spiram.Setup() ;                                     // Prepare SPI bus and chip registers
   delay ( 10 ) ;
-  displayinfo ( "SPI RAM test running", 3 ) ;
-  spiram.Test() ;                                      // Run simple SRAM test
+  displayinfo ( "Detecting SPI RAM", 3 ) ;
+  if ( spiram.detect() )                               // Chip actually present and working?
+  {
+    dbgprint ( "Using SPI RAM as ring buffer, %d bytes", SPIRAM_SIZE ) ;
+  }
+  else
+  {
+    ringbuf = (uint8_t *) malloc ( RINGBFSIZ ) ;        // No, fall back to internal ring buffer
+    dbgprint ( "Using internal ring buffer: Address %p, free %d",
+                                    ringbuf, ESP.getFreeHeap() ) ;
+  }
   delay ( 1000 ) ;
   emptyring() ;                                        // Empty the buffer
-#endif
   delay ( 10 ) ;
   analogrest = ( analogRead ( A0 ) + asw1 ) / 2  ;     // Assumed inactive analog input
   tckr.attach ( 0.100, timer100 ) ;                    // Every 100 msec
@@ -1698,26 +1815,23 @@ void loop()
       putring ( mp3client->read() ) ;                  // Yes, store one byte in ringbuffer
       yield() ;
     }
-  #if defined ( SRAM )
-    if ( ( datamode & ( HEADER |                        // Parsing text data (header, redirect,
-                        PLAYLISTHEADER |                 // or playlist) that may be too short to
-                        PLAYLISTDATA ) ) &&               // fill a whole chunk on its own?
-         ( mp3client->available() == 0 ) )               // No more bytes pending right now?
+    if ( spiram.found &&                               // Using SPI RAM, and
+         ( datamode & ( HEADER |                       // parsing text data (header, redirect,
+                        PLAYLISTHEADER |               // or playlist) that may be too short to
+                        PLAYLISTDATA ) ) &&            // fill a whole chunk on its own?
+         ( mp3client->available() == 0 ) )             // No more bytes pending right now?
     {
-      spiram.flushPartial() ;                            // Force out stuck partial chunk
+      spiram.flushPartial() ;                          // Force out stuck partial chunk
     }
-  #endif
     yield() ;
   }
   while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
   {
-  #if defined ( SRAM )
-    if ( spiram.spiramdelay != 0 )                     // Delay before reading SPIRAM?
+    if ( spiram.found && ( spiram.spiramdelay != 0 ) ) // Using SPI RAM, delay before reading it?
     {
       spiram.spiramdelay-- ;                           // Yes, count down
       break ;                                          // and skip handling of data
     }
-  #endif
     handlebyte_ch ( getring() ) ;                      // Yes, handle it
   }
   yield() ;
@@ -1808,27 +1922,26 @@ void loop()
   {
     gettime() ;                                        // Yes, get the current time
   }
-  #if defined ( LCD ) || defined ( OLED1306 ) || defined ( OLED1309 ) || defined ( OLED1106 )
-    if ( time_req )                                    // Time to refresh timetxt?
+  if ( time_req )                                      // Time to refresh timetxt?
+  {
+    time_req = false ;                                 // Yes, clear request
+    if ( NetworkFound )                                // Time available?
     {
-      time_req = false ;                               // Yes, clear request
-      if ( NetworkFound )                              // Time available?
-      {
-        displaytime ( timetxt ) ;                      // Write to OLED screen
-      }
-      displayvolume ( vs1053player.getVolume() ) ;     // Show volume on display
+      displaytime ( timetxt ) ;                        // Write to display
     }
-    if ( scrollflag )                                  // Time to scroll?
-    {
-      dsp_update() ;                                   // LCD scroll
-      scrollflag = false ;                             // Yes, reset flag
-    }
-  #endif
+    displayvolume ( vs1053player.getVolume() ) ;       // Show volume on display
+  }
+  if ( scrollflag )                                    // Time to scroll?
+  {
+    dsp_update() ;                                     // LCD scroll
+    scrollflag = false ;                               // Yes, reset flag
+  }
   scanserial() ;                                       // Handle serial input
   ArduinoOTA.handle() ;                                // Check for OTA
-  #if defined ( IR )
+  if ( ini_block.ir_enabled )                          // IR enabled in configuration?
+  {
     scanIR() ;                                         // See if IR input
-  #endif
+  }
 }
 
 
@@ -2107,9 +2220,10 @@ void handlebyte ( uint8_t b, bool force )
                       ", metaint is %d",               // and metaint
                       mbitrate, metaint ) ;
           datamode = DATA ;                            // Expecting data now
-        #if defined ( SRAM )
-          spiram.spiramdelay = SPIRAMDELAY ;           // Start delay
-        #endif
+          if ( spiram.found )                          // Using SPI RAM?
+          {
+            spiram.spiramdelay = SPIRAMDELAY ;         // Start delay
+          }
           datacount = metaint ;                        // Number of bytes before first metadata
           bufcnt = 0 ;                                 // Reset buffer count
           vs1053player.switchToMp3Mode() ;
@@ -2120,9 +2234,10 @@ void handlebyte ( uint8_t b, bool force )
            datamode = INIT ;
            stop_mp3client() ;                          // Stop old connection
            emptyring() ;                               // Clear the ringbuffer/SPIRAM of old data
-        #if defined ( SRAM )
-           spiram.spiramdelay = 0 ;                    // Reset delay to resume data processing
-        #endif
+           if ( spiram.found )                         // Using SPI RAM?
+           {
+             spiram.spiramdelay = 0 ;                  // Reset delay to resume data processing
+           }
         }
       }
     }
@@ -2480,6 +2595,10 @@ String chomp ( String str )
 //   mqttpasswd = mypassword                // Set MQTT password for authentication *)     *
 //   mqtttopic  = mytopic                   // Set MQTT topic to subscribe to *)           *
 //   mqttpubtopic = mypubtopic              // Set MQTT topic to publish to *)             *
+//   display    = ssd1306                   // Set display type: none, lcd2004, ssd1306,   *
+//                                          // ssd1309 or sh1106 *)                        *
+//   oledrotation = 0                       // Set OLED rotation: 0, 90, 180 or 270 *)      *
+//   ir_enabled = 0 or 1                    // Enable/disable infrared receiver *)          *
 //   status                                 // Show current URL to play                    *
 //   testfile   = <file on LittleFS>        // Test LittleFS reads for debugging purpose   *
 //   test                                   // For test purposes                           *
@@ -2638,9 +2757,10 @@ const char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-  #if defined ( SRAM )                                // SPI RAM used?
-    rcount = spiram.dataAvailable() ;                 // Yes, get free space
-  #endif
+    if ( spiram.found )                                // SPI RAM used?
+    {
+      rcount = spiram.dataAvailable() ;                // Yes, get free space
+    }
     if ( mp3client )
     {
       sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
@@ -2721,6 +2841,40 @@ const char* analyzeCmd ( const char* par, const char* val )
     {
       ini_block.mqtttopic = value.c_str() ;           // Yes, set broker topic accordingly
     }
+  }
+  else if ( argument == "display" )                   // Display type specified?
+  {
+    value.toLowerCase() ;                              // Allow any case
+    if ( ( value == "none" )    || ( value == "lcd2004" ) ||
+         ( value == "ssd1306" ) || ( value == "ssd1309" ) ||
+         ( value == "sh1106" ) )
+    {
+      ini_block.display = value ;                      // Yes, accept it
+      strcpy ( reply, "Display type changed. Save and restart to have effect" ) ;
+    }
+    else
+    {
+      strcpy ( reply, "Unknown display type, allowed: "
+                       "none, lcd2004, ssd1306, ssd1309, sh1106" ) ;
+    }
+  }
+  else if ( argument == "oledrotation" )              // OLED rotation specified?
+  {
+    if ( ( ivalue == 0 )   || ( ivalue == 90 ) ||
+         ( ivalue == 180 ) || ( ivalue == 270 ) )
+    {
+      ini_block.oledrotation = ivalue ;                // Yes, accept it
+      strcpy ( reply, "OLED rotation changed. Save and restart to have effect" ) ;
+    }
+    else
+    {
+      strcpy ( reply, "Invalid OLED rotation, allowed: 0, 90, 180, 270" ) ;
+    }
+  }
+  else if ( argument == "ir_enabled" )                // Infrared receiver on/off?
+  {
+    ini_block.ir_enabled = ( ivalue != 0 ) ;          // Yes, set flag accordingly
+    strcpy ( reply, "IR setting changed. Save and restart to have effect" ) ;
   }
   else if ( argument == "debug" )                     // debug on/off request?
   {

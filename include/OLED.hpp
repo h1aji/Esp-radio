@@ -7,18 +7,8 @@
 
 #include <Wire.h>
 
-#ifdef OLED1309                                    // Set type acoording to definition
-  #define OLEDTYP 1309
-#endif
-#ifdef OLED1106
-  #define OLEDTYP 1106
-#endif
-#ifdef OLED1306
-  #define OLEDTYP 1306
-#endif
-
 #ifndef OLED_ROTATION
-  #define OLED_ROTATION 0                           // Default: no rotation
+  #define OLED_ROTATION 0                          // Default: no rotation
 #endif
 
 
@@ -49,10 +39,9 @@ struct page_struct
 
 
 // Various macro's to mimic the ST7735 version of display functions
-#define dsp_setRotation(a)      tft->setRotation(a)                // Set rotation (0, 90, 180, 270)
 #define dsp_setTextSize(a)                                         // Set the text size
 #define dsp_setTextColor(a)
-#define dsp_print(a)            tft->print ( a )                   // Print a string 
+#define dsp_print(a)            tft->print ( a )                   // Print a string
 #define dsp_println(a)          tft->print ( a ) ; \
                                 tft->print ( '\n' )                // Print string plus newline
 #define dsp_setCursor(a,b)      tft->setCursor ( a, b )            // Position the cursor
@@ -60,13 +49,14 @@ struct page_struct
 #define dsp_erase()             tft->clear()                       // Clear the screen
 #define dsp_getwidth()          128                                // Get width of screen
 #define dsp_getheight()         64                                 // Get height of screen
-#define dsp_update(a)           tft->display()                     // Updates to the physical screen
 #define dsp_usesSPI()           false                              // Does not use SPI
 
-void displaybattery ( uint16_t bat0, uint16_t bat100, uint16_t adcval ) ;
-void displaytime ( const char* str, uint16_t color = 0xFFFF ) ;
-bool dsp_begin () ;
-void displayvolume  ( uint8_t vol ) ;
+void oled_setRotation ( uint16_t rotation ) ;
+void oled_update() ;
+void oled_displaybattery ( uint16_t bat0, uint16_t bat100, uint16_t adcval ) ;
+void oled_displaytime ( const char* str, uint16_t color = 0xFFFF ) ;
+bool oled_begin () ;
+void oled_displayvolume  ( uint8_t vol ) ;
 
 // Control byte
 #define OLED_CONTROL_BYTE_CMD_SINGLE    0x80
@@ -245,9 +235,8 @@ class OLED
 uint16_t     oledtyp ;                                // Type of OLED
 OLED*        tft ;                                    // Object for display
 
-bool dsp_begin()
+bool oled_begin()
 {
-  oledtyp = OLEDTYP ;                                    // Remember configured OLED type
   dbgprint ( "Init OLED LCD: SDA GPIO %d, SCL GPIO %d",
                                 PIN_WIRE_SDA, PIN_WIRE_SCL ) ;
   if ( ( PIN_WIRE_SDA == 4 ) && ( PIN_WIRE_SCL == 5 ) )  // Make sure correct pins are used
@@ -265,6 +254,32 @@ bool dsp_begin()
     dbgprint ( "Init OLED failed!" ) ;
   }
   return ( tft != NULL ) ;
+}
+
+
+//******************************************************************************************
+//                           O L E D _ S E T R O T A T I O N                               *
+//******************************************************************************************
+void oled_setRotation ( uint16_t rotation )
+{
+  if ( tft )                                           // Display actually found?
+  {
+    tft->setRotation ( rotation ) ;
+  }
+}
+
+
+//******************************************************************************************
+//                              O L E D _ U P D A T E                                      *
+//******************************************************************************************
+// Flush the changed pages of the buffer to the physical display.                          *
+//******************************************************************************************
+void oled_update()
+{
+  if ( tft )                                           // Display actually found?
+  {
+    tft->display() ;
+  }
 }
 
 
@@ -333,7 +348,7 @@ void OLED::display()
       Wire.beginTransmission ( OLED_I2C_ADDRESS ) ;           // Begin transmission
       Wire.write ( (uint8_t)OLED_CONTROL_BYTE_CMD_STREAM ) ;  // Set single byte command mode
       Wire.write ( (uint8_t)(0xB0 | pg ) ) ;                  // Set page address
-      if ( ( oledtyp == 1106 ) || ( oledtyp == 1309 ) )       // Is it an SH1106/ SSD1309?
+      if ( ( oledtyp == 1106 ) || ( oledtyp == 1309 ) )       // Is it SH1106 or SSD1309?
       {
         Wire.write ( (uint8_t)0x00 ) ;                        // Set lower column address to 0
         Wire.write ( (uint8_t)0x10 ) ;                        // Set higher column address to 0
@@ -507,7 +522,7 @@ OLED::OLED ( int8_t sda, int8_t scl )
 // It will be drawn just above the first content line (y=3).                                       *
 // No action if bat0/bat100 not defined in the preferences.                                        *
 //**************************************************************************************************
-void displaybattery ( uint16_t bat0, uint16_t bat100, uint16_t adcval )
+void oled_displaybattery ( uint16_t bat0, uint16_t bat100, uint16_t adcval )
 {
   if ( tft )
   {
@@ -529,7 +544,7 @@ void displaybattery ( uint16_t bat0, uint16_t bat100, uint16_t adcval )
         dsp_fillRect ( 0, ypos, newpos, 2, GREEN ) ;      // Paint green part
         dsp_fillRect ( newpos, ypos,
                        dsp_getwidth() - newpos,
-                       2, RED ) ;                          // Paint red part
+                       2, RED ) ;                         // Paint red part
       }
     }
   }
@@ -542,7 +557,7 @@ void displaybattery ( uint16_t bat0, uint16_t bat100, uint16_t adcval )
 // Show the current volume as an indicator on the screen.                                          *
 // The indicator is 2 pixels heigh.                                                                *
 //**************************************************************************************************
-void displayvolume ( uint8_t vol )
+void oled_displayvolume ( uint8_t vol )
 {
   if ( tft )
   {
@@ -570,7 +585,7 @@ void displayvolume ( uint8_t vol )
 // An empty string will force a refresh on next call.                                              *
 // A character on the screen is 8 pixels high and 6 pixels wide.                                   *
 //**************************************************************************************************
-void displaytime ( const char* str, uint16_t color )
+void oled_displaytime ( const char* str, uint16_t color )
 {
   static char oldstr[9] = "........" ;             // For compare
   uint8_t     i ;                                  // Index in strings
@@ -658,7 +673,7 @@ void OLED::setRotation ( uint16_t rotation )
 // str: string to display (will be UTF8 converted if needed)                               *
 // pos: line position (0=top, 1=second, 2=third, 3=bottom for 128x64)                      *
 //******************************************************************************************
-void displayinfo ( const char *str, int pos )
+void oled_displayinfo ( const char *str, int pos )
 {
   uint16_t  width = dsp_getwidth() ;                   // Get screen width
   uint16_t  y_position = pos * 8 ;                     // Y position: pos * 8 pixels/line
@@ -704,7 +719,7 @@ void displayinfo ( const char *str, int pos )
 // (LCD2004-style pre-padded strings are centered for a 20-column display and do not        *
 // center correctly here, since this font fits a different number of characters per line.)  *
 //******************************************************************************************
-void displaysplash()
+void oled_displaysplash()
 {
   struct { const char* str ; uint8_t pos ; } lines[] =
                 { { "Esp-Radio",   0 },
@@ -728,7 +743,7 @@ void displaysplash()
     memset ( buf, ' ', pad ) ;
     memcpy ( buf + pad, lines[i].str, len ) ;
     buf[pad + len] = '\0' ;
-    displayinfo ( buf, lines[i].pos ) ;
+    oled_displayinfo ( buf, lines[i].pos ) ;
     delay ( 10 ) ;
   }
 }

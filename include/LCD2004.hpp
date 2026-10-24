@@ -46,16 +46,14 @@
 #define FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT 0x02
 #define FLAG_ENTRY_MODE_SET_ENTRY_SHIFT_ON  0x01
 
-#define dsp_print(a)                                        // Print a string
-#define dsp_setCursor(a,b)                                  // Position the cursor
-#define dsp_getwidth()                      20              // Get width of screen
-#define dsp_getheight()                     4               // Get height of screen
+#define lcd_getwidth()                      20              // Get width of screen
+#define lcd_getheight()                     4               // Get height of screen
 
-void displayvolume  ( uint8_t vol ) ;
-void displaytime    ( const char* str ) ;
-void displayinfo    ( const char *str, int pos ) ;
-bool dsp_begin      ();
-void dsp_update     ();
+void lcd_displayvolume  ( uint8_t vol ) ;
+void lcd_displaytime    ( const char* str ) ;
+void lcd_displayinfo    ( const char *str, int pos ) ;
+bool lcd_begin      ();
+void lcd_update     ();
 
 extern char*  dbgprint ( const char* format, ... ) ;       // Print a formatted debug line
 extern struct tm timeinfo ;                                // Will be filled by NTP server
@@ -87,7 +85,7 @@ class LCD2004
 LCD2004* lcd = NULL ;
 
 
-bool dsp_begin()
+bool lcd_begin()
 {
   dbgprint ( "Init I2C LCD2004: SDA GPIO %d, SCL GPIO %d",
                                 PIN_WIRE_SDA, PIN_WIRE_SCL ) ;
@@ -252,7 +250,7 @@ void LCD2004::reset()
 //**************************************************************************************************
 // Utility to scan the I2C bus.                                                                    *
 //**************************************************************************************************
-byte i2cscan()
+byte lcd_i2cscan()
 {
   byte error, address ;
 
@@ -286,7 +284,7 @@ LCD2004::LCD2004 ( int8_t sda, int8_t scl )
   Wire.begin ( sda, scl ) ;
   delay ( 50 ) ;
 
-  LCD_I2C_ADDRESS = i2cscan();                          // Assign the found address to LCD_I2C_ADDRESS
+  LCD_I2C_ADDRESS = lcd_i2cscan();                      // Assign the found address to LCD_I2C_ADDRESS
 
   if ( LCD_I2C_ADDRESS == 0 )
   {
@@ -324,7 +322,7 @@ dsp_str dline[4] = { { "", 0, 0, 0 },
 //***********************************************************************************************
 // Show a selected line                                                                         *
 //***********************************************************************************************
-void dsp_update_line ( uint8_t lnr )
+void lcd_update_line ( uint8_t lnr )
 {
   uint8_t         i ;                                   // Index in string
   const char*     p ;
@@ -332,7 +330,7 @@ void dsp_update_line ( uint8_t lnr )
   p = dline[lnr].str.c_str() ;
   dline[lnr].len = strlen ( p ) ;
   //dbgprint ( "Strlen is %d, str is %s", len, p ) ;
-  if ( dline[lnr].len > dsp_getwidth() )
+  if ( dline[lnr].len > lcd_getwidth() )
   {
     if ( dline[lnr].pos >= dline[lnr].len )
     {
@@ -343,9 +341,9 @@ void dsp_update_line ( uint8_t lnr )
       p += dline[lnr].pos ;
     }
     dline[lnr].len -= dline[lnr].pos ;
-    if ( dline[lnr].len > dsp_getwidth() )
+    if ( dline[lnr].len > lcd_getwidth() )
     {
-      dline[lnr].len = dsp_getwidth() ;
+      dline[lnr].len = lcd_getwidth() ;
     }
   }
   else
@@ -366,7 +364,7 @@ void dsp_update_line ( uint8_t lnr )
     }
     p++ ;
   }
-  for ( i = 0 ; i < ( dsp_getwidth() - dline[lnr].len ) ; i++ )  // Fill remainder
+  for ( i = 0 ; i < ( lcd_getwidth() - dline[lnr].len ) ; i++ )  // Fill remainder
   {
     lcd->print ( ' ' ) ;
   }
@@ -378,11 +376,11 @@ void dsp_update_line ( uint8_t lnr )
 
 
 //***********************************************************************************************
-//                                D S P _U P D A T E                                            *
+//                                L C D _U P D A T E                                            *
 //***********************************************************************************************
 // Show a selection of the 4 sections                                                           *
 //***********************************************************************************************
-void dsp_update()
+void lcd_update()
 {
   static uint16_t cnt = 0 ;                             // Reduce updates
 
@@ -393,16 +391,16 @@ void dsp_update()
   cnt = 0 ;
   dline[2].str.trim() ;                                 // Remove non printing
   dline[1].str.trim() ;                                 // Remove non printing
-  if ( dline[2].str.length() > dsp_getwidth() )
+  if ( dline[2].str.length() > lcd_getwidth() )
   {
     dline[2].str += String ( "  " ) ;
   }
-  if ( dline[1].str.length() > dsp_getwidth() )
+  if ( dline[1].str.length() > lcd_getwidth() )
   {
     dline[1].str += String ( "  " ) ;
   }
-  dsp_update_line ( 1 ) ;
-  dsp_update_line ( 2 ) ;
+  lcd_update_line ( 1 ) ;
+  lcd_update_line ( 2 ) ;
 }
 
 
@@ -412,7 +410,7 @@ void dsp_update()
 // Display volume for this type of display.                                                        *
 // line 3 will be used.                                                                            *
 //**************************************************************************************************
-void displayvolume ( uint8_t vol )
+void lcd_displayvolume ( uint8_t vol )
 {
   static uint8_t   oldvol = 0 ;                       // Previous volume
   uint16_t         pos ;                              // Positon of volume indicator
@@ -423,8 +421,8 @@ void displayvolume ( uint8_t vol )
   {
     // dbgprint ( "Update volume to %d", vol ) ;
     oldvol = vol ;                                    // Remember for next compare
-    pos = map ( vol, 0, 100, 0, dsp_getwidth() ) ;    // Compute end position on TFT
-    for ( int i = 0 ; i < dsp_getwidth() ; i++ )      // Set oldstr to dots
+    pos = map ( vol, 0, 100, 0, lcd_getwidth() ) ;    // Compute end position on TFT
+    for ( int i = 0 ; i < lcd_getwidth() ; i++ )      // Set oldstr to dots
     {
       if ( i <= pos )
       {
@@ -435,7 +433,7 @@ void displayvolume ( uint8_t vol )
         dline[3].str += " " ;                         // Or blank sign
       }
     }
-    dsp_update_line(3) ;
+    lcd_update_line(3) ;
   }
 }
 
@@ -445,7 +443,7 @@ void displayvolume ( uint8_t vol )
 //**************************************************************************************************
 // Display date and time to LCD line 0.                                                            *
 //**************************************************************************************************
-void displaytime ( const char* str )
+void lcd_displaytime ( const char* str )
 {
   const char* WDAYS [] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" } ;
   char        datetxt[28] ;
@@ -473,7 +471,7 @@ void displaytime ( const char* str )
   }
   dline[0].str = String ( datetxt ) ;                    // Copy datestring or empty string to LCD line 0
   oldstr = str[4] ;                                      // For next compare, last digit of time
-  dsp_update_line ( 0 ) ;
+  lcd_update_line ( 0 ) ;
 }
 
 
@@ -482,11 +480,11 @@ void displaytime ( const char* str )
 //******************************************************************************************
 // Show a string on the LCD at a specified y-position in a specified color                 *
 //******************************************************************************************
-void displayinfo ( const char *str, int pos )
+void lcd_displayinfo ( const char *str, int pos )
 {
   char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
   strcpy ( buf, str ) ;                         // Make a local copy of the string
   utf8ascii_ip ( buf ) ;                        // Convert possible UTF8
   dline[pos].str = buf ;                        // Write to buffer
-  dsp_update_line ( pos ) ;                     // Show on display
+  lcd_update_line ( pos ) ;                     // Show on display
 }
