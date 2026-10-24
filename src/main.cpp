@@ -1413,6 +1413,25 @@ void getpresets()
           }
         }
         line = chomp ( line ) ;                          // Remove garbage from description
+        // The comment in the ini file often documents the preset number itself,
+        // e.g. "preset_00 = ... # 0 - Station Name".  Strip that leading "<nr> - "
+        // so it is not duplicated with the "vnr" generated below.
+        inx = 0 ;
+        while ( inx < (int)line.length() && isDigit ( line[inx] ) )
+        {
+          inx++ ;                                        // Skip leading digits
+        }
+        if ( ( inx > 0 ) && ( inx < (int)line.length() ) )
+        {
+          String rest = line.substring ( inx ) ;          // Part after the digits
+          rest.trim() ;
+          if ( rest.startsWith ( "-" ) )                  // Followed by a dash?
+          {
+            rest.remove ( 0, 1 ) ;                         // Yes, this was a leading preset number
+            rest.trim() ;
+            line = rest ;
+          }
+        }
         sprintf ( vnr, "%02d", i ) ;                     // Preset number
         presetlist += ( String ( vnr ) + line +          // 2 digits plus description
                         String ( "|" ) ) ;
